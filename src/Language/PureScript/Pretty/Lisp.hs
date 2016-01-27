@@ -46,7 +46,7 @@ literals = mkPattern' match
   match (LispBooleanLiteral False) = return "false"
   match (LispArrayLiteral xs) = concat <$> sequence
     [ return "[ "
-    , intercalate ", " <$> forM xs prettyPrintLisp'
+    , intercalate " " <$> forM xs prettyPrintLisp'
     , return " ]"
     ]
   match (LispObjectLiteral []) = return "{}"
@@ -64,6 +64,7 @@ literals = mkPattern' match
     objectPropertyToString :: String -> String
     objectPropertyToString s | identNeedsEscaping s = concatMap identCharToString s
                              | otherwise = s
+  match (LispBlock [ret]) = prettyPrintLisp' ret
   match (LispBlock sts@(_:_:_))
     | all isIfReturn (init sts)
     = concat <$> sequence
@@ -83,20 +84,32 @@ literals = mkPattern' match
     compact lisp' = LispVar $ ":else " ++ prettyPrintLisp1 lisp'
   match (LispBlock sts) = concat <$> sequence
     [ return "(do \n"
-    , withIndent $ prettyStatements sts
+    , withIndent $ prettyStatements (nestIfs sts)
     , return "\n"
     , currentIndent
     , return ")"
     ]
+    where
+    nestIfs :: [Lisp] -> [Lisp]
+    nestIfs ((LispIfElse cond block@(LispBlock [LispReturn{}]) Nothing) : sts') =
+      [LispIfElse cond block (Just . LispBlock $ nestIfs sts')]
+    nestIfs ((LispVariableIntroduction var (Just val)) : sts') =
+      [LispApp (LispVar "let") (LispArrayLiteral [LispVar var, val] : (nestIfs sts'))]
+    nestIfs (st':sts') = st' : nestIfs sts'
+    nestIfs [] = []
+  match (LispVar ('$':ident)) = return ('!':ident)
   match (LispVar ident) = return ident
   match (LispVariableIntroduction ident (Just (LispFunction Nothing args body))) =
     prettyPrintLisp' (LispFunction (Just ident) args body)
   match (LispVariableIntroduction ident value) = concat <$> sequence
     [ return "(def "
-    , return ident
+    , return ident'
     , maybe (return "") (fmap (" " ++) . prettyPrintLisp') value
     , return ")"
     ]
+    where
+    ident' | ('$':s) <- ident = '!':s
+           | otherwise = ident
   match (LispAssignment target value) = concat <$> sequence
     [ prettyPrintLisp' target
     , return " = "
@@ -211,13 +224,19 @@ accessor = mkPattern match
 indexer :: Pattern PrinterState Lisp (String, Lisp)
 indexer = mkPattern' match
   where
+  match (LispIndexer index@LispNumericLiteral{} val) = (,) <$> prettyPrintLisp' index <*> pure val
+  match _ = mzero
+
+indexer' :: Pattern PrinterState Lisp (String, Lisp)
+indexer' = mkPattern' match
+  where
+  match (LispIndexer (LispStringLiteral index) val) = return (index, val)
   match (LispIndexer index val) = (,) <$> prettyPrintLisp' index <*> pure val
   match _ = mzero
 
 lam :: Pattern PrinterState Lisp ((Maybe String, [String]), Lisp)
 lam = mkPattern match
   where
-  match (LispFunction name args (LispBlock [ret])) = Just ((name, args), ret)
   match (LispFunction name args ret) = Just ((name, args), ret)
   match _ = Nothing
 
@@ -297,7 +316,8 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
   operators :: OperatorTable PrinterState Lisp String
   operators =
     OperatorTable [ [ Wrap accessor $ \prop val -> val ++ "." ++ prop ]
-                  , [ Wrap indexer $ \index val -> "(get " ++ val ++ index ++ ")" ]
+                  , [ Wrap indexer $ \index val -> "(nth " ++ val ++ " " ++ index ++ ")" ]
+                  , [ Wrap indexer' $ \index val -> "(:" ++ index ++ " " ++ val ++ ")" ]
                   , [ Wrap app $ \args val -> "(" ++ val ++ " " ++ args ++ ")" ]
                   , [ unary LispNew "new " ]
                   , [ Wrap lam $ \(name, args) ret -> "("
@@ -322,9 +342,9 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
                     , binary    LessThanOrEqualTo    "<="
                     , binary    GreaterThan          ">"
                     , binary    GreaterThanOrEqualTo ">="
-                    , AssocR instanceOf $ \v1 v2 -> "(instanceof " ++ v1 ++ " " ++ v2 ++")" ]
-                  , [ binary    EqualTo              "="    -- TODO: need right one
-                    , binary    NotEqualTo           "/=" ] -- TODO: need right one
+                    , AssocR instanceOf $ \v1 v2 -> "(= (:ctor! " ++ v1 ++ ") " ++ show v2 ++")" ]
+                  , [ binary    EqualTo              "="
+                    , binary    NotEqualTo           "/=" ]
                   , [ binary    BitwiseAnd           "&" ]
                   , [ binary    BitwiseXor           "^" ]
                   , [ binary    BitwiseOr            "|" ]

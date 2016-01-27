@@ -176,14 +176,14 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   -- a PureScript identifier. If the name is not valid in Lisp (symbol based, reserved name) an
   -- indexer is returned.
   --
-  accessor :: Ident -> Lisp -> Lisp
-  accessor (Ident prop) = accessorString prop
-  accessor (Op op) = LispIndexer (LispStringLiteral op)
-  accessor (GenIdent _ _) = internalError "GenIdent in accessor"
-
-  accessorString :: String -> Lisp -> Lisp
-  accessorString prop | identNeedsEscaping prop = LispIndexer (LispStringLiteral prop)
-                      | otherwise = LispAccessor prop
+  -- accessor :: Ident -> Lisp -> Lisp
+  -- accessor (Ident prop) = accessorString prop
+  -- accessor (Op op) = LispIndexer (LispStringLiteral op)
+  -- accessor (GenIdent _ _) = internalError "GenIdent in accessor"
+  --
+  -- accessorString :: String -> Lisp -> Lisp
+  -- accessorString prop | identNeedsEscaping prop = LispIndexer (LispStringLiteral prop)
+  --                     | otherwise = LispAccessor prop
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for a value or expression.
@@ -191,26 +191,29 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp :: Expr Ann -> m Lisp
   valueToLisp (Literal (pos, _, _, _) l) =
     maybe id rethrowWithPosition pos $ literalToValueLisp l
+  -- valueToLisp (Var (_, _, _, Just (IsConstructor _ [])) name) =
+    -- return $ LispAccessor "value" $ qualifiedToLisp id name
   valueToLisp (Var (_, _, _, Just (IsConstructor _ [])) name) =
-    return $ LispAccessor "value" $ qualifiedToLisp id name
+    return $ LispApp (qualifiedToLisp id name) []
   valueToLisp (Var (_, _, _, Just (IsConstructor _ _)) name) =
-    return $ LispAccessor "create" $ qualifiedToLisp id name
+    return $ qualifiedToLisp id name
+    -- return $ LispAccessor "create" $ qualifiedToLisp id name
   valueToLisp (Accessor _ prop val) =
     LispIndexer (LispVar prop) <$> valueToLisp val
   valueToLisp (ObjectUpdate _ o ps) = do
     obj <- valueToLisp o
     sts <- mapM (sndM valueToLisp) ps
     extendObj obj sts
-  valueToLisp e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
-    let args = unAbs e
-    in return $ LispFunction Nothing (map identToLisp args) (LispBlock $ map assign args)
-    where
-    unAbs :: Expr Ann -> [Ident]
-    unAbs (Abs _ arg val) = arg : unAbs val
-    unAbs _ = []
-    assign :: Ident -> Lisp
-    assign name = LispAssignment (accessorString (runIdent name) (LispVar "this"))
-                               (var name)
+  -- valueToLisp e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
+  --   let args = unAbs e
+  --   in return $ LispFunction Nothing (map identToLisp args) (LispBlock $ map assign args)
+  --   where
+  --   unAbs :: Expr Ann -> [Ident]
+  --   unAbs (Abs _ arg val) = arg : unAbs val
+  --   unAbs _ = []
+  --   assign :: Ident -> Lisp
+  --   assign name = LispAssignment (accessorString (runIdent name) (LispVar "this"))
+  --                              (var name)
   valueToLisp e@Abs{} = do
     let args = unAbs e
     ret <- mapM valueToLisp (unAbs' e)
@@ -256,7 +259,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Let _ ds val) = do
     ds' <- concat <$> mapM bindToLisp ds
     ret <- valueToLisp val
-    return $ LispApp (LispFunction Nothing [] (LispBlock (ds' ++ [ret]))) []
+    return $ LispApp (LispFunction Nothing [] (LispBlock (ds' ++ [LispReturn ret]))) []
   -- valueToLisp (Constructor (_, _, _, Just IsNewtype) _ (ProperName ctor) _) =
   --   return $ LispVariableIntroduction ctor (Just $
   --               LispObjectLiteral [("create",
@@ -265,7 +268,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Constructor _ _ (ProperName ctor) fields) =
     return $ LispFunction Nothing
                           (fields')
-                          (LispObjectLiteral (zip fields' (LispVar <$> fields')))
+                          (LispReturn $ LispObjectLiteral (("ctor!", LispStringLiteral ctor) : zip fields' (LispVar <$> fields')))
     where
     fields' = identToLisp <$> fields
   literalToValueLisp :: Literal (Expr Ann) -> m Lisp
@@ -310,11 +313,13 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   --
   qualifiedToLisp :: (a -> Ident) -> Qualified a -> Lisp
   qualifiedToLisp f (Qualified (Just (ModuleName [ProperName mn'])) a) | mn' == C.prim = LispVar . runIdent $ f a
-  qualifiedToLisp f (Qualified (Just mn') a) | mn /= mn' = accessor (f a) (LispVar (moduleNameToLisp mn'))
+  -- qualifiedToLisp f (Qualified (Just mn') a) | mn /= mn' = accessor (f a) (LispVar (moduleNameToLisp mn'))
+  qualifiedToLisp f (Qualified (Just mn') a)
+    | mn /= mn' = LispAccessor (identToLisp $ f a) (LispVar (moduleNameToLisp mn'))
   qualifiedToLisp f (Qualified _ a) = LispVar $ identToLisp (f a)
 
   foreignIdent :: Ident -> Lisp
-  foreignIdent ident = accessorString (runIdent ident) (LispVar "!foreign")
+  foreignIdent ident = LispAccessor (runIdent ident) (LispVar "!foreign")
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for pattern match binders
@@ -368,12 +373,12 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   binderToLisp varName done (ConstructorBinder (_, _, _, Just IsNewtype) _ _ [b]) =
     binderToLisp varName done b
   binderToLisp varName done (ConstructorBinder (_, _, _, Just (IsConstructor ctorType fields)) _ ctor bs) = do
-    lisp <- go (zip fields bs) done
+    lisps <- go (zip fields bs) done
     return $ case ctorType of
-      ProductType -> lisp
+      ProductType -> lisps
       SumType ->
         [LispIfElse (LispInstanceOf (LispVar varName) (qualifiedToLisp (Ident . runProperName) ctor))
-                  (LispBlock lisp)
+                  (LispBlock lisps)
                   Nothing]
     where
     go :: [(Ident, Binder Ann)] -> [Lisp] -> m [Lisp]
@@ -408,7 +413,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       propVar <- freshName
       done'' <- go done' bs'
       lisp <- binderToLisp propVar done'' binder
-      return (LispVariableIntroduction propVar (Just (accessorString prop (LispVar varName))) : lisp)
+      return (LispVariableIntroduction propVar (Just (LispIndexer (LispVar prop) (LispVar varName))) : lisp)
   literalToBinderLisp varName done (ArrayLiteral bs) = do
     lisp <- go done 0 bs
     return [LispIfElse (LispBinary EqualTo (LispAccessor "length" (LispVar varName)) (LispNumericLiteral (Left (fromIntegral $ length bs)))) (LispBlock lisp) Nothing]
