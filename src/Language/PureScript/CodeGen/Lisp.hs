@@ -268,7 +268,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Constructor _ _ (ProperName ctor) fields) =
     return $ LispFunction Nothing
                           (fields')
-                          (LispReturn $ LispObjectLiteral (("ctor!", LispStringLiteral ctor) : zip fields' (LispVar <$> fields')))
+                          (LispReturn $ LispObjectLiteral (("ctor!", LispVar (':':ctor)) : zip fields' (LispVar <$> fields')))
     where
     fields' = identToLisp <$> fields
   literalToValueLisp :: Literal (Expr Ann) -> m Lisp
@@ -372,12 +372,12 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     return (LispVariableIntroduction (identToLisp ident) (Just (LispVar varName)) : done)
   binderToLisp varName done (ConstructorBinder (_, _, _, Just IsNewtype) _ _ [b]) =
     binderToLisp varName done b
-  binderToLisp varName done (ConstructorBinder (_, _, _, Just (IsConstructor ctorType fields)) _ ctor bs) = do
+  binderToLisp varName done (ConstructorBinder (_, _, _, Just (IsConstructor ctorType fields)) _ (Qualified _ (ProperName ctor)) bs) = do
     lisps <- go (zip fields bs) done
     return $ case ctorType of
       ProductType -> lisps
       SumType ->
-        [LispIfElse (LispInstanceOf (LispVar varName) (qualifiedToLisp (Ident . runProperName) ctor))
+        [LispIfElse (LispInstanceOf (LispVar varName) (LispVar (':':ctor)))
                   (LispBlock lisps)
                   Nothing]
     where

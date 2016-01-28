@@ -64,7 +64,10 @@ literals = mkPattern' match
     objectPropertyToString :: String -> String
     objectPropertyToString s | identNeedsEscaping s = concatMap identCharToString s
                              | otherwise = s
-  match (LispBlock [ret]) = prettyPrintLisp' ret
+  -- match (LispBlock [LispReturn ret@LispBooleanLiteral{}]) = withIndent $ prettyPrintLisp' ret
+  -- match (LispBlock [LispReturn ret@LispNumericLiteral{}]) = withIndent $ prettyPrintLisp' ret
+  -- match (LispBlock [LispReturn ret@LispStringLiteral{}]) = withIndent $ prettyPrintLisp' ret
+  match (LispBlock [ret@LispObjectLiteral{}]) = withIndent $ prettyPrintLisp' ret
   match (LispBlock sts@(_:_:_))
     | all isIfReturn (init sts)
     = concat <$> sequence
@@ -83,20 +86,25 @@ literals = mkPattern' match
       LispVar $ prettyPrintLisp1 cond ++ " " ++ prettyPrintLisp1 ret
     compact lisp' = LispVar $ ":else " ++ prettyPrintLisp1 lisp'
   match (LispBlock sts) = concat <$> sequence
-    [ return "(do \n"
-    , withIndent $ prettyStatements (nestIfs sts)
-    , return "\n"
-    , currentIndent
-    , return ")"
-    ]
+    (case compacted of
+      [sts'] -> [ return "\n"
+                , withIndent $ prettyStatements [sts']
+                ]
+      sts'   -> [ return "(do \n"
+                , withIndent $ prettyStatements sts'
+                , return "\n"
+                , currentIndent
+                , return ")"
+                ])
     where
-    nestIfs :: [Lisp] -> [Lisp]
-    nestIfs ((LispIfElse cond block@(LispBlock [LispReturn{}]) Nothing) : sts') =
-      [LispIfElse cond block (Just . LispBlock $ nestIfs sts')]
-    nestIfs ((LispVariableIntroduction var (Just val)) : sts') =
-      [LispApp (LispVar "let") (LispArrayLiteral [LispVar var, val] : (nestIfs sts'))]
-    nestIfs (st':sts') = st' : nestIfs sts'
-    nestIfs [] = []
+    compacted = compact sts
+    compact :: [Lisp] -> [Lisp]
+    compact ((LispIfElse cond block@(LispBlock [LispReturn{}]) Nothing) : sts') =
+      [LispIfElse cond block (Just . LispBlock $ compact sts')]
+    compact ((LispVariableIntroduction var (Just val)) : sts') =
+      [LispApp (LispVar "let") (LispArrayLiteral [LispVar var, val] : [LispBlock (compact sts')])]
+    compact (st':sts') = st' : compact sts'
+    compact [] = []
   match (LispVar ('$':ident)) = return ('!':ident)
   match (LispVar ident) = return ident
   match (LispVariableIntroduction ident (Just (LispFunction Nothing args body))) =
@@ -136,9 +144,9 @@ literals = mkPattern' match
     , prettyPrintLisp' sts
     ]
   match (LispIfElse cond thens elses) = concat <$> sequence
-    [ return "(if ("
+    [ return "(if "
     , prettyPrintLisp' cond
-    , return ") "
+    , return " "
     , prettyPrintLisp' thens
     , maybe (return "") (fmap (" " ++) . prettyPrintLisp') elses
     , return ")"
@@ -342,7 +350,7 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
                     , binary    LessThanOrEqualTo    "<="
                     , binary    GreaterThan          ">"
                     , binary    GreaterThanOrEqualTo ">="
-                    , AssocR instanceOf $ \v1 v2 -> "(= (:ctor! " ++ v1 ++ ") " ++ show v2 ++")" ]
+                    , AssocR instanceOf $ \v1 v2 -> "(= (:ctor! " ++ v1 ++ ") " ++ v2 ++")" ]
                   , [ binary    EqualTo              "="
                     , binary    NotEqualTo           "/=" ]
                   , [ binary    BitwiseAnd           "&" ]
