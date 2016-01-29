@@ -66,16 +66,18 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     optimized <- T.traverse (T.traverse optimize) lispDecls
     -- F.traverse_ (F.traverse_ checkIntegers) optimized
     comments <- not <$> asks optionsNoComments
-    let strict = LispStringLiteral "something goes here"
-    let header = if comments && not (null coms) then LispComment coms strict else strict
-    let foreign' = [LispVariableIntroduction "!foreign" foreign_ | not $ null foreigns || isNothing foreign_]
-    let moduleBody = header : foreign' ++ lispImports ++ concat optimized
-    let foreignExps = exps `intersect` (fst `map` foreigns)
-    let standardExps = exps \\ foreignExps
-    let exps' = LispObjectLiteral $ map (runIdent &&& LispVar . identToLisp) standardExps
-                               ++ map (runIdent &&& foreignIdent) foreignExps
-    return $ moduleBody ++ [LispAssignment (LispAccessor "exports" (LispVar "module")) exps']
-
+    let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn]
+    let header = if comments && not (null coms) then LispComment coms namespace else namespace
+    let foreign' = if not (null foreigns)
+                     then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".!foreign"]]
+                     else []
+    let moduleBody = header : foreign' ++ lispImports ++ declarations ++ concat optimized
+    -- let foreignExps = exps `intersect` (fst `map` foreigns)
+    -- let standardExps = exps \\ foreignExps
+    -- let exps' = LispObjectLiteral $ map (runIdent &&& LispVar . identToLisp) standardExps
+    --                            ++ map (runIdent &&& foreignIdent) foreignExps
+    -- return $ moduleBody ++ [LispAssignment (LispAccessor "exports" (LispVar "module")) exps']
+    return moduleBody
   where
 
   -- |
@@ -115,9 +117,19 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   importToLisp :: M.Map ModuleName ModuleName -> ModuleName -> m Lisp
   importToLisp mnLookup mn' = do
     path <- asks optionsRequirePath
-    let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-    let moduleBody = LispApp (LispVar "require") [LispStringLiteral (maybe id (</>) path $ runModuleName mn')]
-    return $ LispVariableIntroduction (moduleNameToLisp mnSafe) (Just moduleBody)
+    -- let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+    let moduleBody = maybe id (</>) path $ runModuleName mn'
+    return $ LispApp (LispVar "use") [LispVar ('\'' : moduleBody)]
+
+  -- |
+  -- Forward declarations of values
+  --
+  declarations :: [Lisp]
+  declarations = LispApp (LispVar "declare") . replicate 1 . LispVar . identToLisp . snd . fst <$>
+                   (filter inModule . M.toList $ E.names env)
+    where
+    inModule :: ((ModuleName, a), b) -> Bool
+    inModule ((mn', _), _) = mn' == mn
 
   -- |
   -- Replaces the `ModuleName`s in the AST so that the generated code refers to
@@ -200,10 +212,22 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     -- return $ LispAccessor "create" $ qualifiedToLisp id name
   valueToLisp (Accessor _ prop val) =
     LispIndexer (LispVar prop) <$> valueToLisp val
-  valueToLisp (ObjectUpdate _ o ps) = do
-    obj <- valueToLisp o
-    sts <- mapM (sndM valueToLisp) ps
-    extendObj obj sts
+  -- TODO: use a more efficient way of copying/updating the hashmap?
+  valueToLisp (ObjectUpdate (_, _, Just ty, _) obj ps) = do
+    obj' <- valueToLisp obj
+    updatedFields <- mapM (sndM valueToLisp) ps
+    let origKeys = (allKeys ty) \\ (fst <$> updatedFields)
+        origFields = (\key -> (key, LispIndexer (LispVar key) obj')) <$> origKeys
+    return $ LispObjectLiteral . sortBy (compare `on` fst) $ origFields ++ updatedFields
+    where
+    allKeys :: T.Type -> [String]
+    allKeys (T.TypeApp (T.TypeConstructor _) r@(T.RCons {})) = fst <$> (fst $ T.rowToList r)
+    allKeys (T.ForAll _ t _) = allKeys t
+    allKeys _ = error $ show "Not a recognized row type"
+  -- valueToLisp (ObjectUpdate _ o ps) = do
+  --   obj <- valueToLisp o
+  --   sts <- mapM (sndM valueToLisp) ps
+  --   extendObj obj sts
   -- valueToLisp e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
   --   let args = unAbs e
   --   in return $ LispFunction Nothing (map identToLisp args) (LispBlock $ map assign args)
@@ -233,8 +257,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     args' <- mapM valueToLisp args
     case f of
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
-      Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
-        return $ LispUnary LispNew $ LispApp (qualifiedToLisp id name) args'
+      -- Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
+      --   return $ LispUnary LispNew $ LispApp (qualifiedToLisp id name) args'
       -- Var (_, _, _, Just IsTypeClassConstructor) name ->
       --   return $ LispUnary LispNew $ LispApp (qualifiedToLisp id name) args'
       Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
@@ -280,24 +304,24 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   literalToValueLisp (ArrayLiteral xs) = LispArrayLiteral <$> mapM valueToLisp xs
   literalToValueLisp (ObjectLiteral ps) = LispObjectLiteral <$> mapM (sndM valueToLisp) ps
 
-  -- |
-  -- Shallow copy an object.
-  --
-  extendObj :: Lisp -> [(String, Lisp)] -> m Lisp
-  extendObj obj sts = do
-    newObj <- freshName
-    key <- freshName
-    let
-      lispKey = LispVar key
-      lispNewObj = LispVar newObj
-      block = LispBlock (objAssign:copy:extend ++ [LispReturn lispNewObj])
-      objAssign = LispVariableIntroduction newObj (Just $ LispObjectLiteral [])
-      copy = LispForIn key obj $ LispBlock [LispIfElse cond assign Nothing]
-      cond = LispApp (LispAccessor "hasOwnProperty" obj) [lispKey]
-      assign = LispBlock [LispAssignment (LispIndexer lispKey lispNewObj) (LispIndexer lispKey obj)]
-      stToAssign (s, lisp) = LispAssignment (LispAccessor s lispNewObj) lisp
-      extend = map stToAssign sts
-    return $ LispApp (LispFunction Nothing [] block) []
+  -- -- |
+  -- -- Shallow copy an object.
+  -- --
+  -- extendObj :: Lisp -> [(String, Lisp)] -> m Lisp
+  -- extendObj obj sts = do
+  --   newObj <- freshName
+  --   key <- freshName
+  --   let
+  --     lispKey = LispVar key
+  --     lispNewObj = LispVar newObj
+  --     block = LispBlock (objAssign:copy:extend ++ [LispReturn lispNewObj])
+  --     objAssign = LispVariableIntroduction newObj (Just $ LispObjectLiteral [])
+  --     copy = LispForIn key obj $ LispBlock [LispIfElse cond assign Nothing]
+  --     cond = LispApp (LispAccessor "hasOwnProperty" obj) [lispKey]
+  --     assign = LispBlock [LispAssignment (LispIndexer lispKey lispNewObj) (LispIndexer lispKey obj)]
+  --     stToAssign (s, lisp) = LispAssignment (LispAccessor s lispNewObj) lisp
+  --     extend = map stToAssign sts
+  --   return $ LispApp (LispFunction Nothing [] block) []
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for a reference to a
@@ -319,7 +343,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   qualifiedToLisp f (Qualified _ a) = LispVar $ identToLisp (f a)
 
   foreignIdent :: Ident -> Lisp
-  foreignIdent ident = LispAccessor (runIdent ident) (LispVar "!foreign")
+  foreignIdent ident = LispAccessor (runIdent ident) (LispVar $ runModuleName mn ++ ".!foreign")
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for pattern match binders
@@ -387,7 +411,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       argVar <- freshName
       done'' <- go remain done'
       lisp <- binderToLisp argVar done'' binder
-      return (LispVariableIntroduction argVar (Just (LispAccessor (identToLisp field) (LispVar varName))) : lisp)
+      return (LispVariableIntroduction argVar (Just (LispIndexer (LispVar $ identToLisp field) (LispVar varName))) : lisp)
   binderToLisp _ _ ConstructorBinder{} =
     internalError "binderToLisp: Invalid ConstructorBinder in binderToLisp"
   binderToLisp varName done (NamedBinder _ ident binder) = do
