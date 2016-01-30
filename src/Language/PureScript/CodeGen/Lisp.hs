@@ -283,7 +283,40 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Let _ ds val) = do
     ds' <- concat <$> mapM bindToLisp ds
     ret <- valueToLisp val
-    return $ LispApp (LispFunction Nothing [] (LispBlock (ds' ++ [LispReturn ret]))) []
+    -- return $ LispApp (LispFunction Nothing [] (LispBlock (ds' ++ [LispReturn ret]))) []
+    -- return $ LispApp (LispVar "let") $ LispArrayLiteral ds' : [LispReturn ret]
+    return $ if any isFunction ds'
+               then let varNames = concatMap varName ds'
+                    in LispApp (LispVar "letfn") $
+                         LispArrayLiteral (concatMap (fnval varNames) ds') : [LispReturn $ replaceVars varNames ret]
+               else LispApp (LispVar "let") $ LispArrayLiteral (concatMap varval ds') : [LispReturn ret]
+    where
+    isFunction :: Lisp -> Bool
+    isFunction (LispVariableIntroduction _ (Just LispFunction{})) = True
+    isFunction (LispFunction{}) = True
+    isFunction _ = False
+
+    replaceVars :: [Lisp] -> Lisp -> Lisp
+    replaceVars ls = everywhereOnLisp (\l -> if l `elem` ls then LispApp l [] else l)
+
+    varName :: Lisp -> [Lisp]
+    varName (LispVariableIntroduction name (Just (LispFunction{}))) = []
+    varName (LispVariableIntroduction name (Just _)) = [LispVar name]
+    varName _ = []
+
+    fnval :: [Lisp] -> Lisp -> [Lisp]
+    fnval vs (LispVariableIntroduction name (Just (LispFunction _ args body))) =
+      [LispApp (LispVar name) [LispArrayLiteral (LispVar <$> args), replaceVars vs body]]
+    fnval vs (LispFunction (Just name) args body) =
+      [LispApp (LispVar name) [LispArrayLiteral (LispVar <$> args), replaceVars vs body]]
+    fnval _ (LispVariableIntroduction var' (Just val')) =
+      [LispApp (LispVar var') [LispArrayLiteral [], val']]
+    fnval _ _ = []
+
+    varval :: Lisp -> [Lisp]
+    varval (LispVariableIntroduction var' (Just val')) = [LispVar var', val']
+    varval _ = []
+
   -- valueToLisp (Constructor (_, _, _, Just IsNewtype) _ (ProperName ctor) _) =
   --   return $ LispVariableIntroduction ctor (Just $
   --               LispObjectLiteral [("create",

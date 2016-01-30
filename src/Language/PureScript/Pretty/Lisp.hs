@@ -44,10 +44,11 @@ literals = mkPattern' match
   match (LispStringLiteral s) = return $ string s
   match (LispBooleanLiteral True) = return "true"
   match (LispBooleanLiteral False) = return "false"
+  match (LispArrayLiteral []) = return "[]"
   match (LispArrayLiteral xs) = concat <$> sequence
-    [ return "[ "
+    [ return "["
     , intercalate " " <$> forM xs prettyPrintLisp'
-    , return " ]"
+    , return "]"
     ]
   match (LispObjectLiteral []) = return "{}"
   match (LispObjectLiteral ps) = concat <$> sequence
@@ -101,8 +102,35 @@ literals = mkPattern' match
     compact :: [Lisp] -> [Lisp]
     compact ((LispIfElse cond block@(LispBlock [LispReturn{}]) Nothing) : sts') =
       [LispIfElse cond block (Just . LispBlock $ compact sts')]
+    -- compact ((LispVariableIntroduction var (Just val)) : sts')
+    --   | any isFunction sts' =
+    --     [LispApp (LispVar "letfn") (LispArrayLiteral ([LispVar var, val] ++ fs'): [LispBlock (compact ss)])]
+    --   where
+    --   (fs, ss) = span isFunction sts'
+    --   fs' = []
+    --   isFunction :: Lisp -> Bool
+    --   isFunction (LispVariableIntroduction _ (Just LispFunction{})) = True
+    --   isFunction _ = False
+    --
+    -- compact ((LispVariableIntroduction var (Just val@LispFunction{})) :
+    --                                           st@(LispVariableIntroduction var' (Just val'@LispFunction{})) : sts') =
+    --   [LispApp (LispVar "letfn") (LispArrayLiteral [ LispVar var, val
+    --                                                , LispVar var', val'
+    --                                                ] : [LispBlock (compact sts')])]
+
     compact ((LispVariableIntroduction var (Just val)) : sts') =
-      [LispApp (LispVar "let") (LispArrayLiteral [LispVar var, val] : [LispBlock (compact sts')])]
+      [LispApp (LispVar "let") (LispArrayLiteral ([LispVar var, val] ++ vars') : [LispBlock (compact others)])]
+      where
+      (vars, others) = span isVarIntro sts'
+      vars' :: [Lisp]
+      vars' = concatMap varval vars
+      isVarIntro :: Lisp -> Bool
+      isVarIntro LispVariableIntroduction{} = True
+      isVarIntro _ = False
+      varval :: Lisp -> [Lisp]
+      varval (LispVariableIntroduction var' (Just val')) = [LispVar var', val']
+      varval _ = []
+
     compact (st':sts') = st' : compact sts'
     compact [] = []
   match (LispVar ('$':ident)) = return ('!':ident)
@@ -254,6 +282,15 @@ app = mkPattern' match
   match (LispApp val args) = do
     lisps <- traverse prettyPrintLisp' args
     return (intercalate " " lisps, val)
+  match (LispUnary Not val) = do
+    lisps <- traverse prettyPrintLisp' [val]
+    return (intercalate " " lisps, LispVar "not")
+  match (LispUnary Negate val) = do
+    lisps <- traverse prettyPrintLisp' [val]
+    return (intercalate " " lisps, LispVar "-")
+  match (LispUnary _ val) = do
+    lisps <- traverse prettyPrintLisp' [val]
+    return (intercalate " " lisps, LispVar "?")
   match _ = mzero
 
 typeOf :: Pattern PrinterState Lisp ((), Lisp)
@@ -268,23 +305,23 @@ instanceOf = mkPattern match
   match (LispInstanceOf val ty) = Just (val, ty)
   match _ = Nothing
 
-unary' :: UnaryOperator -> (Lisp -> String) -> Operator PrinterState Lisp String
-unary' op mkStr = Wrap match (++)
-  where
-  match :: Pattern PrinterState Lisp (String, Lisp)
-  match = mkPattern match'
-    where
-    match' (LispUnary op' val) | op' == op = Just (mkStr val, val)
-    match' _ = Nothing
-
-unary :: UnaryOperator -> String -> Operator PrinterState Lisp String
-unary op str = unary' op (const str)
-
-negateOperator :: Operator PrinterState Lisp String
-negateOperator = unary' Negate (\v -> if isNegate v then "- " else "-")
-  where
-  isNegate (LispUnary Negate _) = True
-  isNegate _ = False
+-- unary' :: UnaryOperator -> (Lisp -> String) -> Operator PrinterState Lisp String
+-- unary' op mkStr = Wrap match (++)
+--   where
+--   match :: Pattern PrinterState Lisp (String, Lisp)
+--   match = mkPattern match'
+--     where
+--     match' (LispUnary op' val) | op' == op = Just (mkStr val, val)
+--     match' _ = Nothing
+--
+-- unary :: UnaryOperator -> String -> Operator PrinterState Lisp String
+-- unary op str = unary' op (const str)
+--
+-- negateOperator :: Operator PrinterState Lisp String
+-- negateOperator = unary' Negate (\v -> if isNegate v then "- " else "-")
+--   where
+--   isNegate (LispUnary Negate _) = True
+--   isNegate _ = False
 
 binary :: BinaryOperator -> String -> Operator PrinterState Lisp String
 binary op str = AssocL match (\v1 v2 -> "(" ++ str ++ " " ++ v1 ++ " " ++ v2 ++")")
@@ -327,17 +364,17 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
                   , [ Wrap indexer $ \index val -> "(nth " ++ val ++ " " ++ index ++ ")" ]
                   , [ Wrap indexer' $ \index val -> "(:" ++ index ++ " " ++ val ++ ")" ]
                   , [ Wrap app $ \args val -> "(" ++ val ++ " " ++ args ++ ")" ]
-                  , [ unary LispNew "new " ]
+                  -- , [ unary LispNew "new " ]
                   , [ Wrap lam $ \(name, args) ret -> "("
                         ++ maybe "fn" ("defn " ++) name
                         ++ " [" ++ intercalate " " args ++ "] "
                         ++ ret
                         ++ ")" ]
                   , [ Wrap typeOf $ \_ s -> "typeof " ++ s ]
-                  , [ unary     Not                  "!"
-                    , unary     BitwiseNot           "~"
-                    , unary     Positive             "+"
-                    , negateOperator ]
+                  -- , [ unary     Not                  "!"
+                  --   , unary     BitwiseNot           "~"
+                  --   , unary     Positive             "+"
+                  --   , negateOperator ]
                   , [ binary    Multiply             "*"
                     , binary    Divide               "/"
                     , binary    Modulus              "%" ]

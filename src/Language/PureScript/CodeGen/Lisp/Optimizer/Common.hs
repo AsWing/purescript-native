@@ -7,6 +7,8 @@ import Data.Maybe (fromMaybe)
 
 import Language.PureScript.Crash
 import Language.PureScript.CodeGen.Lisp.AST
+import Language.PureScript.CodeGen.Lisp.Common
+import Language.PureScript.Names
 
 applyAll :: [a -> a] -> a -> a
 applyAll = foldl1 (.)
@@ -66,6 +68,7 @@ removeFromBlock go (LispBlock sts) = LispBlock (go sts)
 removeFromBlock _  lisp = lisp
 
 isFn :: (String, String) -> Lisp -> Bool
+isFn (moduleName, fnName) (LispAccessor x (LispVar y)) = x == (identToLisp (Ident fnName)) && y == moduleName
 isFn (moduleName, fnName) (LispAccessor x (LispVar y)) = x == fnName && y == moduleName
 isFn (moduleName, fnName) (LispIndexer (LispStringLiteral x) (LispVar y)) = x == fnName && y == moduleName
 isFn _ _ = False
