@@ -132,6 +132,10 @@ data Lisp
   --
   | LispStringLiteral String
   -- |
+  -- A character literal
+  --
+  | LispCharLiteral Char
+  -- |
   -- A boolean literal
   --
   | LispBooleanLiteral Bool

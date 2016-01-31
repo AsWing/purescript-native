@@ -66,10 +66,10 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     optimized <- T.traverse (T.traverse optimize) lispDecls
     -- F.traverse_ (F.traverse_ checkIntegers) optimized
     comments <- not <$> asks optionsNoComments
-    let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn]
+    let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn ++ ".core"]
     let header = if comments && not (null coms) then LispComment coms namespace else namespace
     let foreign' = if not (null foreigns)
-                     then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".!foreign"]]
+                     then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".foreign"]]
                      else []
     let moduleBody = header : foreign' ++ lispImports ++ declarations ++ concat optimized
     -- let foreignExps = exps `intersect` (fst `map` foreigns)
@@ -77,7 +77,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     -- let exps' = LispObjectLiteral $ map (runIdent &&& LispVar . identToLisp) standardExps
     --                            ++ map (runIdent &&& foreignIdent) foreignExps
     -- return $ moduleBody ++ [LispAssignment (LispAccessor "exports" (LispVar "module")) exps']
-    return moduleBody
+    return $ moduleBody
   where
 
   -- |
@@ -119,7 +119,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     path <- asks optionsRequirePath
     -- let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
     let moduleBody = maybe id (</>) path $ runModuleName mn'
-    return $ LispApp (LispVar "use") [LispVar ('\'' : moduleBody)]
+    return $ LispApp (LispVar "use") [LispVar ('\'' : moduleBody ++ ".core")]
 
   -- |
   -- Forward declarations of values
@@ -172,6 +172,9 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     --    then nonRecToLisp i (modifyAnn removeComments e)
     --    else LispComment com <$> nonRecToLisp i (modifyAnn removeComments e)
     LispComment com <$> nonRecToLisp i (modifyAnn removeComments e)
+  nonRecToLisp (Ident "main") val| isMain mn = do
+    lisp <- valueToLisp val
+    return $ LispFunction (Just "-main") ["& args"] (LispBlock [LispReturn lisp])
   nonRecToLisp ident val = do
     lisp <- valueToLisp val
     return $ LispVariableIntroduction (identToLisp ident) (Just lisp)
@@ -238,20 +241,20 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   --   assign :: Ident -> Lisp
   --   assign name = LispAssignment (accessorString (runIdent name) (LispVar "this"))
   --                              (var name)
-  valueToLisp e@Abs{} = do
-    let args = unAbs e
-    ret <- mapM valueToLisp (unAbs' e)
-    return $ LispFunction Nothing (map identToLisp args) (LispBlock ret)
-    where
-    unAbs :: Expr Ann -> [Ident]
-    unAbs (Abs _ arg val) = arg : unAbs val
-    unAbs _ = []
-    unAbs' :: Expr Ann -> [Expr Ann]
-    unAbs' (Abs _ _ val) = unAbs' val
-    unAbs' val = [val]
-  -- valueToLisp (Abs _ arg val) = do
-  --   ret <- valueToLisp val
-  --   return $ LispFunction Nothing [identToLisp arg] ret
+  -- valueToLisp e@Abs{} = do
+  --   let args = unAbs e
+  --   ret <- mapM valueToLisp (unAbs' e)
+  --   return $ LispFunction Nothing (map identToLisp args) (LispBlock ret)
+  --   where
+  --   unAbs :: Expr Ann -> [Ident]
+  --   unAbs (Abs _ arg val) = arg : unAbs val
+  --   unAbs _ = []
+  --   unAbs' :: Expr Ann -> [Expr Ann]
+  --   unAbs' (Abs _ _ val) = unAbs' val
+  --   unAbs' val = [val]
+  valueToLisp (Abs _ arg val) = do
+    ret <- valueToLisp val
+    return $ LispFunction Nothing [identToLisp arg] ret
   valueToLisp e@App{} = do
     let (f, args) = unApp e []
     args' <- mapM valueToLisp args
@@ -271,7 +274,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     unApp other args = (other, args)
   valueToLisp (Var (_, _, _, Just IsForeign) qi@(Qualified (Just mn') ident)) =
     return $ if mn' == mn
-             then foreignIdent ident
+             then LispVar $ identToLisp ident
              else varToLisp qi
   valueToLisp (Var (_, _, _, Just IsForeign) ident) =
     error $ "Encountered an unqualified reference to a foreign ident " ++ showQualified showIdent ident
@@ -332,7 +335,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   literalToValueLisp (NumericLiteral (Left i)) = return $ LispNumericLiteral (Left i)
   literalToValueLisp (NumericLiteral (Right n)) = return $ LispNumericLiteral (Right n)
   literalToValueLisp (StringLiteral s) = return $ LispStringLiteral s
-  literalToValueLisp (CharLiteral c) = return $ LispStringLiteral [c]
+  literalToValueLisp (CharLiteral c) = return $ LispCharLiteral c
   literalToValueLisp (BooleanLiteral b) = return $ LispBooleanLiteral b
   literalToValueLisp (ArrayLiteral xs) = LispArrayLiteral <$> mapM valueToLisp xs
   literalToValueLisp (ObjectLiteral ps) = LispObjectLiteral <$> mapM (sndM valueToLisp) ps
@@ -375,8 +378,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     | mn /= mn' = LispAccessor (identToLisp $ f a) (LispVar (moduleNameToLisp mn'))
   qualifiedToLisp f (Qualified _ a) = LispVar $ identToLisp (f a)
 
-  foreignIdent :: Ident -> Lisp
-  foreignIdent ident = LispAccessor (runIdent ident) (LispVar $ runModuleName mn ++ ".!foreign")
+  -- foreignIdent :: Ident -> Lisp
+  -- foreignIdent ident = LispAccessor (runIdent ident) (LispVar $ runModuleName mn ++ ".!foreign")
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for pattern match binders
@@ -455,7 +458,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   literalToBinderLisp varName done (NumericLiteral num) =
     return [LispIfElse (LispBinary EqualTo (LispVar varName) (LispNumericLiteral num)) (LispBlock done) Nothing]
   literalToBinderLisp varName done (CharLiteral c) =
-    return [LispIfElse (LispBinary EqualTo (LispVar varName) (LispStringLiteral [c])) (LispBlock done) Nothing]
+    return [LispIfElse (LispBinary EqualTo (LispVar varName) (LispCharLiteral c)) (LispBlock done) Nothing]
   literalToBinderLisp varName done (StringLiteral str) =
     return [LispIfElse (LispBinary EqualTo (LispVar varName) (LispStringLiteral str)) (LispBlock done) Nothing]
   literalToBinderLisp varName done (BooleanLiteral True) =
@@ -473,7 +476,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       return (LispVariableIntroduction propVar (Just (LispIndexer (LispVar prop) (LispVar varName))) : lisp)
   literalToBinderLisp varName done (ArrayLiteral bs) = do
     lisp <- go done 0 bs
-    return [LispIfElse (LispBinary EqualTo (LispAccessor "length" (LispVar varName)) (LispNumericLiteral (Left (fromIntegral $ length bs)))) (LispBlock lisp) Nothing]
+    return [LispIfElse (LispBinary EqualTo (LispApp (LispVar "count")
+                       [LispVar varName]) (LispNumericLiteral (Left (fromIntegral $ length bs)))) (LispBlock lisp) Nothing]
     where
     go :: [Lisp] -> Integer -> [Binder Ann] -> m [Lisp]
     go done' _ [] = return done'
@@ -492,3 +496,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       fns' <- (\(i,t) -> (runIdent i, t)) <$> fns
       = Just (fst <$> params, constraints, (sortBy (compare `on` normalizedName . fst) fns'))
   findClass _ = Nothing
+
+isMain :: ModuleName -> Bool
+isMain (ModuleName [ProperName "Main"]) = True
+isMain _ = False

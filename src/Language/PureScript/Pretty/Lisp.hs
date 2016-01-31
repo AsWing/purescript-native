@@ -42,6 +42,7 @@ literals = mkPattern' match
   match :: Lisp -> StateT PrinterState Maybe String
   match (LispNumericLiteral n) = return $ either show show n
   match (LispStringLiteral s) = return $ string s
+  match (LispCharLiteral c) = return $ '\\' : [c]
   match (LispBooleanLiteral True) = return "true"
   match (LispBooleanLiteral False) = return "false"
   match (LispArrayLiteral []) = return "[]"
