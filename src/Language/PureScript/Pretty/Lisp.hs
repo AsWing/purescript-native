@@ -274,7 +274,7 @@ indexer' = mkPattern' match
 lam :: Pattern PrinterState Lisp ((Maybe String, [String]), Lisp)
 lam = mkPattern match
   where
-  match (LispFunction name args ret) = Just ((name, args), ret)
+  match (LispFunction name args ret) = Just ((name, map (map (\c -> if c == '$' then '!' else c)) args), ret)
   match _ = Nothing
 
 app :: Pattern PrinterState Lisp (String, Lisp)

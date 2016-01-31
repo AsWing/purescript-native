@@ -58,18 +58,19 @@ moduleToLisp
   -> m [Lisp]
 moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   rethrow (addHint (ErrorInModule mn)) $ do
-    let usedNames = concatMap getNames decls
-    let mnLookup = renameImports usedNames imps
-    lispImports <- T.traverse (importToLisp mnLookup) . delete (ModuleName [ProperName C.prim]) . (\\ [mn]) $ imps
-    let decls' = renameModules mnLookup decls
-    lispDecls <- mapM bindToLisp decls'
+    -- let usedNames = concatMap getNames decls
+    -- let mnLookup = renameImports usedNames imps
+    lispImports <- T.traverse importToLisp . delete (ModuleName [ProperName C.prim]) . (\\ [mn]) $ imps
+    -- let decls' = renameModules mnLookup decls
+    lispDecls <- mapM bindToLisp decls
     optimized <- T.traverse (T.traverse optimize) lispDecls
     -- F.traverse_ (F.traverse_ checkIntegers) optimized
     comments <- not <$> asks optionsNoComments
     let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn ++ ".core"]
     let header = if comments && not (null coms) then LispComment coms namespace else namespace
     let foreign' = if not (null foreigns)
-                     then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".foreign"]]
+                     -- then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".foreign"]]
+                     then [LispApp (LispVar "load") [LispStringLiteral "foreign"]]
                      else []
     let moduleBody = header : foreign' ++ lispImports ++ declarations ++ concat optimized
     -- let foreignExps = exps `intersect` (fst `map` foreigns)
@@ -87,35 +88,36 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   getNames (NonRec ident _) = [ident]
   getNames (Rec vals) = map fst vals
 
-  -- |
-  -- Creates alternative names for each module to ensure they don't collide
-  -- with declaration names.
+  -- -- |
+  -- -- Creates alternative names for each module to ensure they don't collide
+  -- -- with declaration names.
+  -- --
+  -- renameImports :: [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
+  -- renameImports ids mns = go M.empty ids mns
+  --   where
+  --   go :: M.Map ModuleName ModuleName -> [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
+  --   go acc used (mn' : mns') =
+  --     let mni = Ident $ runModuleName mn'
+  --     in if mn' /= mn && mni `elem` used
+  --        then let newName = freshModuleName 1 mn' used
+  --             in go (M.insert mn' newName acc) (Ident (runModuleName newName) : used) mns'
+  --        else go (M.insert mn' mn' acc) (mni : used) mns'
+  --   go acc _ [] = acc
   --
-  renameImports :: [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
-  renameImports ids mns = go M.empty ids mns
-    where
-    go :: M.Map ModuleName ModuleName -> [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
-    go acc used (mn' : mns') =
-      let mni = Ident $ runModuleName mn'
-      in if mn' /= mn && mni `elem` used
-         then let newName = freshModuleName 1 mn' used
-              in go (M.insert mn' newName acc) (Ident (runModuleName newName) : used) mns'
-         else go (M.insert mn' mn' acc) (mni : used) mns'
-    go acc _ [] = acc
-
-    freshModuleName :: Integer -> ModuleName -> [Ident] -> ModuleName
-    freshModuleName i mn'@(ModuleName pns) used =
-      let newName = ModuleName $ init pns ++ [ProperName $ runProperName (last pns) ++ "_" ++ show i]
-      in if Ident (runModuleName newName) `elem` used
-         then freshModuleName (i + 1) mn' used
-         else newName
+  --   freshModuleName :: Integer -> ModuleName -> [Ident] -> ModuleName
+  --   freshModuleName i mn'@(ModuleName pns) used =
+  --     let newName = ModuleName $ init pns ++ [ProperName $ runProperName (last pns) ++ "_" ++ show i]
+  --     in if Ident (runModuleName newName) `elem` used
+  --        then freshModuleName (i + 1) mn' used
+  --        else newName
 
   -- |
   -- Generates Lisp code for a module import, binding the required module
   -- to the alternative
   --
-  importToLisp :: M.Map ModuleName ModuleName -> ModuleName -> m Lisp
-  importToLisp mnLookup mn' = do
+  -- importToLisp :: M.Map ModuleName ModuleName -> ModuleName -> m Lisp
+  importToLisp :: ModuleName -> m Lisp
+  importToLisp mn' = do
     path <- asks optionsRequirePath
     -- let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
     let moduleBody = maybe id (</>) path $ runModuleName mn'
@@ -131,26 +133,26 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     inModule :: ((ModuleName, a), (b, E.NameKind, c)) -> Bool
     inModule ((mn', _), (_, kind, _)) = mn' == mn && kind /= E.External
 
-  -- |
-  -- Replaces the `ModuleName`s in the AST so that the generated code refers to
-  -- the collision-avoiding renamed module imports.
-  --
-  renameModules :: M.Map ModuleName ModuleName -> [Bind Ann] -> [Bind Ann]
-  renameModules mnLookup binds =
-    let (f, _, _) = everywhereOnValues id goExpr goBinder
-    in map f binds
-    where
-    goExpr :: Expr a -> Expr a
-    goExpr (Var ann q) = Var ann (renameQual q)
-    goExpr e = e
-    goBinder :: Binder a -> Binder a
-    goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
-    goBinder b = b
-    renameQual :: Qualified a -> Qualified a
-    renameQual (Qualified (Just mn') a) =
-      let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-      in Qualified (Just mnSafe) a
-    renameQual q = q
+  -- -- |
+  -- -- Replaces the `ModuleName`s in the AST so that the generated code refers to
+  -- -- the collision-avoiding renamed module imports.
+  -- --
+  -- renameModules :: M.Map ModuleName ModuleName -> [Bind Ann] -> [Bind Ann]
+  -- renameModules mnLookup binds =
+  --   let (f, _, _) = everywhereOnValues id goExpr goBinder
+  --   in map f binds
+  --   where
+  --   goExpr :: Expr a -> Expr a
+  --   goExpr (Var ann q) = Var ann (renameQual q)
+  --   goExpr e = e
+  --   goBinder :: Binder a -> Binder a
+  --   goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
+  --   goBinder b = b
+  --   renameQual :: Qualified a -> Qualified a
+  --   renameQual (Qualified (Just mn') a) =
+  --     let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+  --     in Qualified (Just mnSafe) a
+  --   renameQual q = q
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for a declaration
@@ -174,7 +176,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     LispComment com <$> nonRecToLisp i (modifyAnn removeComments e)
   nonRecToLisp (Ident "main") val| isMain mn = do
     lisp <- valueToLisp val
-    return $ LispFunction (Just "-main") ["& args"] (LispBlock [LispReturn lisp])
+    return $ LispFunction (Just "-main") ["& args"] (LispBlock [LispReturn (LispApp lisp [])])
   nonRecToLisp ident val = do
     lisp <- valueToLisp val
     return $ LispVariableIntroduction (identToLisp ident) (Just lisp)
@@ -375,7 +377,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   qualifiedToLisp f (Qualified (Just (ModuleName [ProperName mn'])) a) | mn' == C.prim = LispVar . runIdent $ f a
   -- qualifiedToLisp f (Qualified (Just mn') a) | mn /= mn' = accessor (f a) (LispVar (moduleNameToLisp mn'))
   qualifiedToLisp f (Qualified (Just mn') a)
-    | mn /= mn' = LispAccessor (identToLisp $ f a) (LispVar (moduleNameToLisp mn'))
+    | mn /= mn' = LispAccessor (identToLisp $ f a) (LispVar (runModuleName mn'))
   qualifiedToLisp f (Qualified _ a) = LispVar $ identToLisp (f a)
 
   -- foreignIdent :: Ident -> Lisp
