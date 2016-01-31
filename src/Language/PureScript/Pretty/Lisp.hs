@@ -361,7 +361,7 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
   matchValue = buildPrettyPrinter operators (literals <+> fmap parens matchValue)
   operators :: OperatorTable PrinterState Lisp String
   operators =
-    OperatorTable [ [ Wrap accessor $ \prop val -> val ++ "." ++ prop ]
+    OperatorTable [ [ Wrap accessor $ \prop val -> val ++ "/" ++ prop ]
                   , [ Wrap indexer $ \index val -> "(nth " ++ val ++ " " ++ index ++ ")" ]
                   , [ Wrap indexer' $ \index val -> "(:" ++ index ++ " " ++ val ++ ")" ]
                   , [ Wrap app $ \args val -> "(" ++ val ++ " " ++ args ++ ")" ]

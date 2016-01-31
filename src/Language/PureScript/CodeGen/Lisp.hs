@@ -119,7 +119,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     path <- asks optionsRequirePath
     -- let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
     let moduleBody = maybe id (</>) path $ runModuleName mn'
-    return $ LispApp (LispVar "use") [LispVar ('\'' : moduleBody ++ ".core")]
+    return $ LispApp (LispVar "require") [LispVar ('\'' : '[' : moduleBody ++ ".core :as " ++ moduleBody ++ "]")]
 
   -- |
   -- Forward declarations of values
@@ -128,8 +128,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   declarations = LispApp (LispVar "declare") . replicate 1 . LispVar . identToLisp . snd . fst <$>
                    (filter inModule . M.toList $ E.names env)
     where
-    inModule :: ((ModuleName, a), b) -> Bool
-    inModule ((mn', _), _) = mn' == mn
+    inModule :: ((ModuleName, a), (b, E.NameKind, c)) -> Bool
+    inModule ((mn', _), (_, kind, _)) = mn' == mn && kind /= E.External
 
   -- |
   -- Replaces the `ModuleName`s in the AST so that the generated code refers to
