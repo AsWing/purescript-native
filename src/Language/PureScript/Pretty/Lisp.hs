@@ -66,9 +66,6 @@ literals = mkPattern' match
     objectPropertyToString :: String -> String
     objectPropertyToString s | identNeedsEscaping s = concatMap identCharToString s
                              | otherwise = s
-  -- match (LispBlock [LispReturn ret@LispBooleanLiteral{}]) = withIndent $ prettyPrintLisp' ret
-  -- match (LispBlock [LispReturn ret@LispNumericLiteral{}]) = withIndent $ prettyPrintLisp' ret
-  -- match (LispBlock [LispReturn ret@LispStringLiteral{}]) = withIndent $ prettyPrintLisp' ret
   match (LispBlock [ret@LispObjectLiteral{}]) = withIndent $ prettyPrintLisp' ret
   match (LispBlock sts@(_:_:_))
     | all isIfReturn (init sts)
@@ -103,22 +100,6 @@ literals = mkPattern' match
     compact :: [Lisp] -> [Lisp]
     compact ((LispIfElse cond block@(LispBlock [LispReturn{}]) Nothing) : sts') =
       [LispIfElse cond block (Just . LispBlock $ compact sts')]
-    -- compact ((LispVariableIntroduction var (Just val)) : sts')
-    --   | any isFunction sts' =
-    --     [LispApp (LispVar "letfn") (LispArrayLiteral ([LispVar var, val] ++ fs'): [LispBlock (compact ss)])]
-    --   where
-    --   (fs, ss) = span isFunction sts'
-    --   fs' = []
-    --   isFunction :: Lisp -> Bool
-    --   isFunction (LispVariableIntroduction _ (Just LispFunction{})) = True
-    --   isFunction _ = False
-    --
-    -- compact ((LispVariableIntroduction var (Just val@LispFunction{})) :
-    --                                           st@(LispVariableIntroduction var' (Just val'@LispFunction{})) : sts') =
-    --   [LispApp (LispVar "letfn") (LispArrayLiteral [ LispVar var, val
-    --                                                , LispVar var', val'
-    --                                                ] : [LispBlock (compact sts')])]
-
     compact ((LispVariableIntroduction var (Just val)) : sts') =
       [LispApp (LispVar "let") (LispArrayLiteral ([LispVar var, val] ++ vars') : [LispBlock (compact others)])]
       where
@@ -131,7 +112,6 @@ literals = mkPattern' match
       varval :: Lisp -> [Lisp]
       varval (LispVariableIntroduction var' (Just val')) = [LispVar var', val']
       varval _ = []
-
     compact (st':sts') = st' : compact sts'
     compact [] = []
   match (LispVar ('$':ident)) = return ('!':ident)
@@ -158,20 +138,6 @@ literals = mkPattern' match
     , return ") "
     , prettyPrintLisp' sts
     ]
-  match (LispFor ident start end sts) = concat <$> sequence
-    [ return $ "for (var " ++ ident ++ " = "
-    , prettyPrintLisp' start
-    , return $ "; " ++ ident ++ " < "
-    , prettyPrintLisp' end
-    , return $ "; " ++ ident ++ "++) "
-    , prettyPrintLisp' sts
-    ]
-  match (LispForIn ident obj sts) = concat <$> sequence
-    [ return $ "for (var " ++ ident ++ " in "
-    , prettyPrintLisp' obj
-    , return ") "
-    , prettyPrintLisp' sts
-    ]
   match (LispIfElse cond thens elses) = concat <$> sequence
     [ return "(if "
     , prettyPrintLisp' cond
@@ -187,12 +153,6 @@ literals = mkPattern' match
     [ return "(throw (Exception. "
     , prettyPrintLisp' value
     , return "))"
-    ]
-  match (LispBreak lbl) = return $ "break " ++ lbl
-  match (LispContinue lbl) = return $ "continue " ++ lbl
-  match (LispLabel lbl lisp) = concat <$> sequence
-    [ return $ lbl ++ ": "
-    , prettyPrintLisp' lisp
     ]
   match (LispComment com lisp) = fmap concat $ sequence $
     [ return "\n"
@@ -294,12 +254,6 @@ app = mkPattern' match
     return (intercalate " " lisps, LispVar "?")
   match _ = mzero
 
-typeOf :: Pattern PrinterState Lisp ((), Lisp)
-typeOf = mkPattern match
-  where
-  match (LispTypeOf val) = Just ((), val)
-  match _ = Nothing
-
 instanceOf :: Pattern PrinterState Lisp (Lisp, Lisp)
 instanceOf = mkPattern match
   where
@@ -371,7 +325,6 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
                         ++ " [" ++ intercalate " " args ++ "] "
                         ++ ret
                         ++ ")" ]
-                  , [ Wrap typeOf $ \_ s -> "typeof " ++ s ]
                   -- , [ unary     Not                  "!"
                   --   , unary     BitwiseNot           "~"
                   --   , unary     Positive             "+"

@@ -32,8 +32,6 @@ isReassigned var1 = everythingOnLisp (||) check
   check (LispFunction _ args _) | var1 `elem` args = True
   check (LispVariableIntroduction arg _) | var1 == arg = True
   check (LispAssignment (LispVar arg) _) | var1 == arg = True
-  check (LispFor arg _ _ _) | var1 == arg = True
-  check (LispForIn arg _ _) | var1 == arg = True
   check _ = False
 
 isRebound :: Lisp -> Lisp -> Bool

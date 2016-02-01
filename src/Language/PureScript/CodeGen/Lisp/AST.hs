@@ -196,14 +196,6 @@ data Lisp
   --
   | LispWhile Lisp Lisp
   -- |
-  -- For loop
-  --
-  | LispFor String Lisp Lisp Lisp
-  -- |
-  -- ForIn loop
-  --
-  | LispForIn String Lisp Lisp
-  -- |
   -- If-then-else statement
   --
   | LispIfElse Lisp Lisp (Maybe Lisp)
@@ -216,25 +208,9 @@ data Lisp
   --
   | LispThrow Lisp
   -- |
-  -- Type-Of operator
-  --
-  | LispTypeOf Lisp
-  -- |
   -- InstanceOf test
   --
   | LispInstanceOf Lisp Lisp
-  -- |
-  -- Labelled statement
-  --
-  | LispLabel String Lisp
-  -- |
-  -- Break statement
-  --
-  | LispBreak String
-  -- |
-  -- Continue statement
-  --
-  | LispContinue String
   -- |
   -- Raw Lisp (generated when parsing fails for an inline foreign import declaration)
   --
@@ -266,13 +242,9 @@ everywhereOnLisp f = go
   go (LispVariableIntroduction name l) = f (LispVariableIntroduction name (fmap go l))
   go (LispAssignment l1 l2) = f (LispAssignment (go l1) (go l2))
   go (LispWhile l1 l2) = f (LispWhile (go l1) (go l2))
-  go (LispFor name l1 l2 l3) = f (LispFor name (go l1) (go l2) (go l3))
-  go (LispForIn name l1 l2) = f (LispForIn name (go l1) (go l2))
   go (LispIfElse l1 l2 l3) = f (LispIfElse (go l1) (go l2) (fmap go l3))
   go (LispReturn ls) = f (LispReturn (go ls))
   go (LispThrow ls) = f (LispThrow (go ls))
-  go (LispTypeOf ls) = f (LispTypeOf (go ls))
-  go (LispLabel name ls) = f (LispLabel name (go ls))
   go (LispInstanceOf l1 l2) = f (LispInstanceOf (go l1) (go l2))
   go (LispComment com l) = f (LispComment com (go l))
   go other = f other
@@ -297,13 +269,9 @@ everywhereOnLispTopDownM f = f >=> go
   go (LispVariableIntroduction name l) = LispVariableIntroduction name <$> traverse f' l
   go (LispAssignment l1 l2) = LispAssignment <$> f' l1 <*> f' l2
   go (LispWhile l1 l2) = LispWhile <$> f' l1 <*> f' l2
-  go (LispFor name l1 l2 l3) = LispFor name <$> f' l1 <*> f' l2 <*> f' l3
-  go (LispForIn name l1 l2) = LispForIn name <$> f' l1 <*> f' l2
   go (LispIfElse l1 l2 l3) = LispIfElse <$> f' l1 <*> f' l2 <*> traverse f' l3
   go (LispReturn l) = LispReturn <$> f' l
   go (LispThrow l) = LispThrow <$> f' l
-  go (LispTypeOf l) = LispTypeOf <$> f' l
-  go (LispLabel name l) = LispLabel name <$> f' l
   go (LispInstanceOf l1 l2) = LispInstanceOf <$> f' l1 <*> f' l2
   go (LispComment com l) = LispComment com <$> f' l
   go other = f other
@@ -324,14 +292,10 @@ everythingOnLisp (<>) f = go
   go l@(LispVariableIntroduction _ (Just l1)) = f l <> go l1
   go l@(LispAssignment l1 l2) = f l <> go l1 <> go l2
   go l@(LispWhile l1 l2) = f l <> go l1 <> go l2
-  go l@(LispFor _ l1 l2 l3) = f l <> go l1 <> go l2 <> go l3
-  go l@(LispForIn _ l1 l2) = f l <> go l1 <> go l2
   go l@(LispIfElse l1 l2 Nothing) = f l <> go l1 <> go l2
   go l@(LispIfElse l1 l2 (Just l3)) = f l <> go l1 <> go l2 <> go l3
   go l@(LispReturn l1) = f l <> go l1
   go l@(LispThrow l1) = f l <> go l1
-  go l@(LispTypeOf l1) = f l <> go l1
-  go l@(LispLabel _ l1) = f l <> go l1
   go l@(LispInstanceOf l1 l2) = f l <> go l1 <> go l2
   go l@(LispComment _ l1) = f l <> go l1
   go other = f other

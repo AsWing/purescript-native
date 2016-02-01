@@ -9,11 +9,6 @@ import Data.List (intercalate)
 import Language.PureScript.Crash
 import Language.PureScript.Names
 
--- moduleNameToLisp :: ModuleName -> String
--- moduleNameToLisp (ModuleName pns) =
---   let name = intercalate "_" (runProperName `map` pns)
---   in if nameIsLispBuiltIn name then "!!" ++ name else name
-
 -- |
 -- Convert an Ident into a valid Lisp identifier:
 --

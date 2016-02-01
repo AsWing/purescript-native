@@ -77,8 +77,6 @@ magicDo' = everywhereOnLisp undo . everywhereOnLispTopDown convert
   applyReturns (LispReturn ret) = LispReturn (LispApp ret [])
   applyReturns (LispBlock lisps) = LispBlock (map applyReturns lisps)
   applyReturns (LispWhile cond lisp) = LispWhile cond (applyReturns lisp)
-  applyReturns (LispFor v lo hi lisp) = LispFor v lo hi (applyReturns lisp)
-  applyReturns (LispForIn v xs lisp) = LispForIn v xs (applyReturns lisp)
   applyReturns (LispIfElse cond t f) = LispIfElse cond (applyReturns t) (applyReturns `fmap` f)
   applyReturns other = other
 

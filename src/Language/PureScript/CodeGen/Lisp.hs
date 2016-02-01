@@ -19,7 +19,6 @@ import Data.List ((\\), delete, intersect, sort, sortBy)
 import Data.Function (on)
 import Data.Maybe (isNothing, fromMaybe)
 import qualified Data.Map as M
--- import qualified Data.Foldable as F
 import qualified Data.Traversable as T
 
 import Control.Arrow ((&&&))
@@ -58,26 +57,16 @@ moduleToLisp
   -> m [Lisp]
 moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   rethrow (addHint (ErrorInModule mn)) $ do
-    -- let usedNames = concatMap getNames decls
-    -- let mnLookup = renameImports usedNames imps
     lispImports <- T.traverse importToLisp . delete (ModuleName [ProperName C.prim]) . (\\ [mn]) $ imps
-    -- let decls' = renameModules mnLookup decls
     lispDecls <- mapM bindToLisp decls
     optimized <- T.traverse (T.traverse optimize) lispDecls
-    -- F.traverse_ (F.traverse_ checkIntegers) optimized
     comments <- not <$> asks optionsNoComments
     let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn ++ ".core"]
     let header = if comments && not (null coms) then LispComment coms namespace else namespace
     let foreign' = if not (null foreigns)
-                     -- then [LispApp (LispVar "use") [LispVar $ '\'' : runModuleName mn ++ ".foreign"]]
                      then [LispApp (LispVar "load") [LispStringLiteral "foreign"]]
                      else []
     let moduleBody = header : foreign' ++ lispImports ++ declarations ++ concat optimized
-    -- let foreignExps = exps `intersect` (fst `map` foreigns)
-    -- let standardExps = exps \\ foreignExps
-    -- let exps' = LispObjectLiteral $ map (runIdent &&& LispVar . identToLisp) standardExps
-    --                            ++ map (runIdent &&& foreignIdent) foreignExps
-    -- return $ moduleBody ++ [LispAssignment (LispAccessor "exports" (LispVar "module")) exps']
     return $ moduleBody
   where
 
@@ -87,29 +76,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   getNames :: Bind Ann -> [Ident]
   getNames (NonRec ident _) = [ident]
   getNames (Rec vals) = map fst vals
-
-  -- -- |
-  -- -- Creates alternative names for each module to ensure they don't collide
-  -- -- with declaration names.
-  -- --
-  -- renameImports :: [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
-  -- renameImports ids mns = go M.empty ids mns
-  --   where
-  --   go :: M.Map ModuleName ModuleName -> [Ident] -> [ModuleName] -> M.Map ModuleName ModuleName
-  --   go acc used (mn' : mns') =
-  --     let mni = Ident $ runModuleName mn'
-  --     in if mn' /= mn && mni `elem` used
-  --        then let newName = freshModuleName 1 mn' used
-  --             in go (M.insert mn' newName acc) (Ident (runModuleName newName) : used) mns'
-  --        else go (M.insert mn' mn' acc) (mni : used) mns'
-  --   go acc _ [] = acc
-  --
-  --   freshModuleName :: Integer -> ModuleName -> [Ident] -> ModuleName
-  --   freshModuleName i mn'@(ModuleName pns) used =
-  --     let newName = ModuleName $ init pns ++ [ProperName $ runProperName (last pns) ++ "_" ++ show i]
-  --     in if Ident (runModuleName newName) `elem` used
-  --        then freshModuleName (i + 1) mn' used
-  --        else newName
 
   -- |
   -- Generates Lisp code for a module import, binding the required module
@@ -132,27 +98,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     where
     inModule :: ((ModuleName, a), (b, E.NameKind, c)) -> Bool
     inModule ((mn', _), (_, kind, _)) = mn' == mn && kind /= E.External
-
-  -- -- |
-  -- -- Replaces the `ModuleName`s in the AST so that the generated code refers to
-  -- -- the collision-avoiding renamed module imports.
-  -- --
-  -- renameModules :: M.Map ModuleName ModuleName -> [Bind Ann] -> [Bind Ann]
-  -- renameModules mnLookup binds =
-  --   let (f, _, _) = everywhereOnValues id goExpr goBinder
-  --   in map f binds
-  --   where
-  --   goExpr :: Expr a -> Expr a
-  --   goExpr (Var ann q) = Var ann (renameQual q)
-  --   goExpr e = e
-  --   goBinder :: Binder a -> Binder a
-  --   goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
-  --   goBinder b = b
-  --   renameQual :: Qualified a -> Qualified a
-  --   renameQual (Qualified (Just mn') a) =
-  --     let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-  --     in Qualified (Just mnSafe) a
-  --   renameQual q = q
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for a declaration
@@ -189,32 +134,15 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   var = LispVar . identToLisp
 
   -- |
-  -- Generate code in the simplified Lisp intermediate representation for an accessor based on
-  -- a PureScript identifier. If the name is not valid in Lisp (symbol based, reserved name) an
-  -- indexer is returned.
-  --
-  -- accessor :: Ident -> Lisp -> Lisp
-  -- accessor (Ident prop) = accessorString prop
-  -- accessor (Op op) = LispIndexer (LispStringLiteral op)
-  -- accessor (GenIdent _ _) = internalError "GenIdent in accessor"
-  --
-  -- accessorString :: String -> Lisp -> Lisp
-  -- accessorString prop | identNeedsEscaping prop = LispIndexer (LispStringLiteral prop)
-  --                     | otherwise = LispAccessor prop
-
-  -- |
   -- Generate code in the simplified Lisp intermediate representation for a value or expression.
   --
   valueToLisp :: Expr Ann -> m Lisp
   valueToLisp (Literal (pos, _, _, _) l) =
     maybe id rethrowWithPosition pos $ literalToValueLisp l
-  -- valueToLisp (Var (_, _, _, Just (IsConstructor _ [])) name) =
-    -- return $ LispAccessor "value" $ qualifiedToLisp id name
   valueToLisp (Var (_, _, _, Just (IsConstructor _ [])) name) =
     return $ LispApp (qualifiedToLisp id name) []
   valueToLisp (Var (_, _, _, Just (IsConstructor _ _)) name) =
     return $ qualifiedToLisp id name
-    -- return $ LispAccessor "create" $ qualifiedToLisp id name
   valueToLisp (Accessor _ prop val) =
     LispIndexer (LispVar prop) <$> valueToLisp val
   -- TODO: use a more efficient way of copying/updating the hashmap?
@@ -229,31 +157,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     allKeys (T.TypeApp (T.TypeConstructor _) r@(T.RCons {})) = fst <$> (fst $ T.rowToList r)
     allKeys (T.ForAll _ t _) = allKeys t
     allKeys _ = error $ show "Not a recognized row type"
-  -- valueToLisp (ObjectUpdate _ o ps) = do
-  --   obj <- valueToLisp o
-  --   sts <- mapM (sndM valueToLisp) ps
-  --   extendObj obj sts
-  -- valueToLisp e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
-  --   let args = unAbs e
-  --   in return $ LispFunction Nothing (map identToLisp args) (LispBlock $ map assign args)
-  --   where
-  --   unAbs :: Expr Ann -> [Ident]
-  --   unAbs (Abs _ arg val) = arg : unAbs val
-  --   unAbs _ = []
-  --   assign :: Ident -> Lisp
-  --   assign name = LispAssignment (accessorString (runIdent name) (LispVar "this"))
-  --                              (var name)
-  -- valueToLisp e@Abs{} = do
-  --   let args = unAbs e
-  --   ret <- mapM valueToLisp (unAbs' e)
-  --   return $ LispFunction Nothing (map identToLisp args) (LispBlock ret)
-  --   where
-  --   unAbs :: Expr Ann -> [Ident]
-  --   unAbs (Abs _ arg val) = arg : unAbs val
-  --   unAbs _ = []
-  --   unAbs' :: Expr Ann -> [Expr Ann]
-  --   unAbs' (Abs _ _ val) = unAbs' val
-  --   unAbs' val = [val]
   valueToLisp (Abs _ arg val) = do
     ret <- valueToLisp val
     return $ LispFunction Nothing [identToLisp arg] ret
@@ -262,10 +165,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     args' <- mapM valueToLisp args
     case f of
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
-      -- Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
-      --   return $ LispUnary LispNew $ LispApp (qualifiedToLisp id name) args'
-      -- Var (_, _, _, Just IsTypeClassConstructor) name ->
-      --   return $ LispUnary LispNew $ LispApp (qualifiedToLisp id name) args'
       Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
         let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname)) in
         return . LispObjectLiteral $ zip ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns)) args'
@@ -288,8 +187,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Let _ ds val) = do
     ds' <- concat <$> mapM bindToLisp ds
     ret <- valueToLisp val
-    -- return $ LispApp (LispFunction Nothing [] (LispBlock (ds' ++ [LispReturn ret]))) []
-    -- return $ LispApp (LispVar "let") $ LispArrayLiteral ds' : [LispReturn ret]
     return $ if any isFunction ds'
                then let varNames = concatMap varName ds'
                     in LispApp (LispVar "letfn") $
@@ -321,12 +218,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     varval :: Lisp -> [Lisp]
     varval (LispVariableIntroduction var' (Just val')) = [LispVar var', val']
     varval _ = []
-
-  -- valueToLisp (Constructor (_, _, _, Just IsNewtype) _ (ProperName ctor) _) =
-  --   return $ LispVariableIntroduction ctor (Just $
-  --               LispObjectLiteral [("create",
-  --                 LispFunction Nothing ["value"]
-  --                   (LispBlock [LispReturn $ LispVar "value"]))])
   valueToLisp (Constructor _ _ (ProperName ctor) fields) =
     return $ LispFunction Nothing
                           (fields')
@@ -341,25 +232,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   literalToValueLisp (BooleanLiteral b) = return $ LispBooleanLiteral b
   literalToValueLisp (ArrayLiteral xs) = LispArrayLiteral <$> mapM valueToLisp xs
   literalToValueLisp (ObjectLiteral ps) = LispObjectLiteral <$> mapM (sndM valueToLisp) ps
-
-  -- -- |
-  -- -- Shallow copy an object.
-  -- --
-  -- extendObj :: Lisp -> [(String, Lisp)] -> m Lisp
-  -- extendObj obj sts = do
-  --   newObj <- freshName
-  --   key <- freshName
-  --   let
-  --     lispKey = LispVar key
-  --     lispNewObj = LispVar newObj
-  --     block = LispBlock (objAssign:copy:extend ++ [LispReturn lispNewObj])
-  --     objAssign = LispVariableIntroduction newObj (Just $ LispObjectLiteral [])
-  --     copy = LispForIn key obj $ LispBlock [LispIfElse cond assign Nothing]
-  --     cond = LispApp (LispAccessor "hasOwnProperty" obj) [lispKey]
-  --     assign = LispBlock [LispAssignment (LispIndexer lispKey lispNewObj) (LispIndexer lispKey obj)]
-  --     stToAssign (s, lisp) = LispAssignment (LispAccessor s lispNewObj) lisp
-  --     extend = map stToAssign sts
-  --   return $ LispApp (LispFunction Nothing [] block) []
 
   -- |
   -- Generate code in the simplified Lisp intermediate representation for a reference to a
@@ -380,9 +252,6 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     | mn /= mn' = LispAccessor (identToLisp $ f a) (LispVar (runModuleName mn'))
   qualifiedToLisp f (Qualified _ a) = LispVar $ identToLisp (f a)
 
-  -- foreignIdent :: Ident -> Lisp
-  -- foreignIdent ident = LispAccessor (runIdent ident) (LispVar $ runModuleName mn ++ ".!foreign")
-
   -- |
   -- Generate code in the simplified Lisp intermediate representation for pattern match binders
   -- and guards.
@@ -390,11 +259,12 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   bindersToLisp :: Maybe SourceSpan -> [CaseAlternative Ann] -> [Lisp] -> m Lisp
   bindersToLisp maybeSpan binders vals = do
     valNames <- replicateM (length vals) freshName
-    let assignments = zipWith LispVariableIntroduction valNames (map Just vals)
+    let valNames' = map (map (\c -> if c == '$' then '!' else c)) valNames
+    let assignments = zipWith LispVariableIntroduction valNames' (map Just vals)
     lisps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- guardsToLisp result
-      go valNames ret bs
-    return $ LispBlock (assignments ++ concat lisps ++ [LispThrow $ failedPatternError valNames])
+      go valNames' ret bs
+    return $ LispBlock (assignments ++ concat lisps ++ [LispThrow $ failedPatternError valNames'])
     where
       go :: [String] -> [Lisp] -> [Binder Ann] -> m [Lisp]
       go _ done [] = return done
@@ -404,8 +274,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       go _ _ _ = internalError "Invalid arguments to bindersToLisp"
 
       failedPatternError :: [String] -> Lisp
-      -- failedPatternError names = LispUnary LispNew $ LispApp (LispVar "Error") [LispBinary Add (LispStringLiteral failedPatternMessage) (LispArrayLiteral $ zipWith valueError names vals)]
-      failedPatternError _ = LispStringLiteral failedPatternMessage
+      failedPatternError names = LispApp (LispVar "str") (LispStringLiteral failedPatternMessage : zipWith valueError names vals)
       failedPatternMessage :: String
       failedPatternMessage = "Failed pattern match" ++ maybe "" (((" at " ++ runModuleName mn ++ " ") ++) . displayStartEndPos) maybeSpan ++ ": "
 
@@ -413,7 +282,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       valueError _ l@(LispNumericLiteral _) = l
       valueError _ l@(LispStringLiteral _)  = l
       valueError _ l@(LispBooleanLiteral _) = l
-      valueError s _                      = LispAccessor "name" . LispAccessor "constructor" $ LispVar s
+      valueError s _                        = LispApp (LispVar "pr-str") [LispVar s]
 
       guardsToLisp :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [Lisp]
       guardsToLisp (Left gs) = forM gs $ \(cond, val) -> do
