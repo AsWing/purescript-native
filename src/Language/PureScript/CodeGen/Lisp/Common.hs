@@ -21,6 +21,8 @@ import Language.PureScript.Names
 identToLisp :: Ident -> String
 identToLisp (Ident name)
   | nameIsLispReserved name || nameIsLispBuiltIn name = "!!" ++ name
+  | [c] <- name, isLower c = '_' : identCharToString c
+  | (c:_) <- name, isLower c = '!' : concatMap identCharToString name
   | otherwise = concatMap identCharToString name
 identToLisp (Op op) = concatMap identCharToString op
 identToLisp (GenIdent _ _) = internalError "GenIdent in identToLisp"
@@ -80,56 +82,27 @@ nameIsLispBuiltIn name =
 lispAnyReserved :: [String]
 lispAnyReserved =
   concat
-    [ lispReserved
+    [ javaReserved
     , lispLiterals
     ]
 
-lispReserved :: [String]
-lispReserved =
-  [ "alias"
-  , "and"
-  , "compare"
-  , "complement"
-  , "cond"
-  , "declare"
-  , "def"
-  , "defn"
-  , "do"
-  , "fn"
-  , "hash-map"
-  , "if"
-  , "import"
-  , "let"
-  , "letfn"
-  , "list"
-  , "load"
-  , "loop"
-  , "map"
-  , "new"
-  , "not"
-  , "ns"
-  , "or"
-  , "require"
-  , "refer"
-  , "return"
-  , "seq"
-  , "throw"
-  , "try"
-  , "use"
-  , "var"
-  , "vec"
-  , "vector"
-  , "void"
-  , "while"
-  , "when"
+javaReserved :: [String]
+javaReserved =
+  [ "Boolean"
+  , "Byte"
+  , "Character"
+  , "Integer"
+  , "Double"
+  , "Enum"
+  , "Float"
+  , "Long"
+  , "Short"
+  , "String"
+  , "Void"
   ]
 
 lispLiterals :: [String]
-lispLiterals =
-  [ "null"
-  , "true"
-  , "false"
-  ]
+lispLiterals = []
 
 normalizedName :: String -> String
 normalizedName ('_' : s) | last s == '_', s' <- init s, nameIsLispReserved s' = s'

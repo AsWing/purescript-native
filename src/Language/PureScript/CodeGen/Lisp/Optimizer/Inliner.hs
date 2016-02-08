@@ -87,10 +87,10 @@ inlineValues = everywhereOnLisp convert
     | isDict' boundedBoolean dict && isFn' fnBottom fn = LispBooleanLiteral False
     | isDict' boundedBoolean dict && isFn' fnTop fn = LispBooleanLiteral True
   convert (LispApp (LispApp (LispApp fn [dict]) [x]) [y])
-    | isDict' semiringInt dict && isFn' fnAdd fn = intOp Add x y
-    | isDict' semiringInt dict && isFn' fnMultiply fn = intOp Multiply x y
-    | isDict' moduloSemiringInt dict && isFn' fnDivide fn = intOp Divide x y
-    | isDict' ringInt dict && isFn' fnSubtract fn = intOp Subtract x y
+    | isDict' semiringInt dict && isFn' fnAdd fn = LispBinary Add x y
+    | isDict' semiringInt dict && isFn' fnMultiply fn = LispBinary Multiply x y
+    | isDict' moduloSemiringInt dict && isFn' fnDivide fn = LispBinary Divide x y
+    | isDict' ringInt dict && isFn' fnSubtract fn = LispBinary Subtract x y
   convert other = other
   fnZero = [(C.prelude, C.zero), (C.dataSemiring, C.zero)]
   fnOne = [(C.prelude, C.one), (C.dataSemiring, C.one)]
@@ -100,7 +100,6 @@ inlineValues = everywhereOnLisp convert
   fnDivide = [(C.prelude, (C./)), (C.prelude, (C.div)), (C.dataModuloSemiring, C.div)]
   fnMultiply = [(C.prelude, (C.*)), (C.prelude, (C.mul)), (C.dataSemiring, (C.*)), (C.dataSemiring, (C.mul))]
   fnSubtract = [(C.prelude, (C.-)), (C.prelude, C.sub), (C.dataRing, C.sub)]
-  intOp op x y = LispBinary BitwiseOr (LispBinary op x y) (LispNumericLiteral (Left 0))
 
 inlineOperator :: (String, String) -> (Lisp -> Lisp -> Lisp) -> Lisp -> Lisp
 inlineOperator (m, op) f = everywhereOnLisp convert
