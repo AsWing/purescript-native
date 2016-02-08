@@ -163,8 +163,10 @@ dotsTo chr = map (\c -> if c == '.' then chr else c)
 
 projectTxt :: String
 projectTxt = intercalate "\n" lines'
-  where lines' = [ "(defproject main \"\""
+  where lines' = [ "(defproject main \"0.1.0-SNAPSHOT\""
                  , "  :description \"PureScript output\""
                  , "  :dependencies [[org.clojure/clojure \"1.7.0\"]]"
-                 , "  :main Main.core)"
+                 , "  :main ^:skip-aot Main.core"
+                 , "  :target-path \"target/%s\""
+                 , "  :profiles {:uberjar {:aot :all}})"
                  ]

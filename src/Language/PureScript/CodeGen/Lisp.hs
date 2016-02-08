@@ -61,7 +61,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     lispDecls <- mapM bindToLisp decls
     optimized <- T.traverse (T.traverse optimize) lispDecls
     comments <- not <$> asks optionsNoComments
-    let namespace = LispApp (LispVar "ns") [LispVar $ runModuleName mn ++ ".core"]
+    let genclass = if isMain mn then [LispApp (LispVar ":gen-class") []] else []
+    let namespace = LispApp (LispVar "ns") $ [LispVar $ runModuleName mn ++ ".core"] ++ genclass
     let header = if comments && not (null coms) then LispComment coms namespace else namespace
     let foreign' = if not (null foreigns)
                      then [LispApp (LispVar "load") [LispStringLiteral "foreign"]]
