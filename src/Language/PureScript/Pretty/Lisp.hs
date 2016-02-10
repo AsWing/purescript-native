@@ -111,19 +111,15 @@ literals = mkPattern' match
       varval _ = []
     compact (st':sts') = st' : compact sts'
     compact [] = []
-  match (LispVar ('$':ident)) = return ('_':ident)
   match (LispVar ident) = return ident
   match (LispVariableIntroduction ident (Just (LispFunction Nothing args body))) =
     prettyPrintLisp' (LispFunction (Just ident) args body)
   match (LispVariableIntroduction ident value) = concat <$> sequence
     [ return "(def "
-    , return ident'
+    , return ident
     , maybe (return "") (fmap (" " ++) . prettyPrintLisp') value
     , return ")"
     ]
-    where
-    ident' | ('$':s) <- ident = '_':s
-           | otherwise = ident
   match (LispAssignment target value) = concat <$> sequence
     [ prettyPrintLisp' target
     , return " = "
@@ -232,7 +228,7 @@ indexer' = mkPattern' match
 lam :: Pattern PrinterState Lisp ((Maybe String, [String]), Lisp)
 lam = mkPattern match
   where
-  match (LispFunction name args ret) = Just ((name, map (map (\c -> if c == '$' then '_' else c)) args), ret)
+  match (LispFunction name args ret) = Just ((name, args), ret)
   match _ = Nothing
 
 app :: Pattern PrinterState Lisp (String, Lisp)

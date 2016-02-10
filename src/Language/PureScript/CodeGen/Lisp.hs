@@ -262,12 +262,11 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   bindersToLisp :: Maybe SourceSpan -> [CaseAlternative Ann] -> [Lisp] -> m Lisp
   bindersToLisp maybeSpan binders vals = do
     valNames <- replicateM (length vals) freshName
-    let valNames' = map (map (\c -> if c == '$' then '_' else c)) valNames
-    let assignments = zipWith LispVariableIntroduction valNames' (map Just vals)
+    let assignments = zipWith LispVariableIntroduction valNames (map Just vals)
     lisps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- guardsToLisp result
-      go valNames' ret bs
-    return $ LispBlock (assignments ++ concat lisps ++ [LispThrow $ failedPatternError valNames'])
+      go valNames ret bs
+    return $ LispBlock (assignments ++ concat lisps ++ [LispThrow $ failedPatternError valNames])
     where
       go :: [String] -> [Lisp] -> [Binder Ann] -> m [Lisp]
       go _ done [] = return done

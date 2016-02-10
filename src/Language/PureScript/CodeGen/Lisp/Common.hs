@@ -26,7 +26,6 @@ identToLisp (GenIdent _ _) = internalError "GenIdent in identToLisp"
 safeName :: String -> String
 safeName name
   | nameIsLispReserved name || nameIsLispBuiltIn name = "!!" ++ name
-  -- | [c] <- name, isLower c = '_' : identCharToString c
   | (':':name') <- name = ':' : concatMap identCharToString name'
   | (c:_) <- name, isLower c = '!' : concatMap identCharToString name
   | otherwise = concatMap identCharToString name

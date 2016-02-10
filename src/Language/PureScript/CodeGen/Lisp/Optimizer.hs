@@ -59,6 +59,7 @@ optimize' lisp = do
     , removeCodeAfterReturnStatements
     , removeUnusedArg
     , removeUndefinedApp
+    , removeSafePrefix
     , unThunk
     , etaConvert
     , evaluateIifes

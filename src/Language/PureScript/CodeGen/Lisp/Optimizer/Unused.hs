@@ -17,6 +17,7 @@ module Language.PureScript.CodeGen.Lisp.Optimizer.Unused
   ( removeCodeAfterReturnStatements
   , removeUnusedArg
   , removeUndefinedApp
+  , removeSafePrefix
   ) where
 
 import Language.PureScript.CodeGen.Lisp.AST
@@ -43,4 +44,13 @@ removeUndefinedApp :: Lisp -> Lisp
 removeUndefinedApp = everywhereOnLisp convert
   where
   convert (LispApp fn [LispVar arg]) | arg == C.undefined = LispApp fn [LispVar "nil"]
+  convert lisp = lisp
+
+removeSafePrefix :: Lisp -> Lisp
+removeSafePrefix = everywhereOnLisp convert
+  where
+  convert (LispFunction name ['!':arg] body) = LispFunction name [arg] (everywhereOnLisp convert' body)
+    where
+    convert' (LispVar ('!':name)) | name == arg = LispVar name
+    convert' lisp = lisp
   convert lisp = lisp
