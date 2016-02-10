@@ -16,7 +16,7 @@ author: Phil Freeman <paf31@cantab.net>,
         Hardy Jones <jones3.hardy@gmail.com>,
         Harry Garrood <harry@garrood.me>
 
-tested-with: GHC==7.8
+tested-with: GHC==7.8.4, GHC==7.10.3, GHC==8.0.1
 
 extra-source-files: examples/passing/*.purs
                   , examples/failing/*.purs
@@ -27,7 +27,13 @@ extra-source-files: examples/passing/*.purs
                   , tests/support/package.json
                   , tests/support/bower.json
                   , tests/support/setup-win.cmd
-                  , psci/tests/data/Sample.purs
+                  , tests/support/flattened/*.purs
+                  , tests/support/flattened/*.js
+                  , tests/support/psci/*.purs
+                  , tests/support/prelude/bower.json
+                  , tests/support/prelude/src/*.purs
+                  , tests/support/prelude/src/*.js
+                  , tests/support/prelude/LICENSE
                   , stack.yaml
                   , stack-lts-2.yaml
                   , stack-lts-3.yaml
@@ -54,13 +60,13 @@ library
                    filepath -any,
                    mtl >= 2.1.0 && < 2.3.0,
                    parsec -any,
-                   transformers >= 0.3.0 && < 0.5,
+                   transformers >= 0.3.0 && < 0.6,
                    transformers-compat >= 0.3.0,
                    utf8-string >= 1 && < 2,
                    pattern-arrows >= 0.0.2 && < 0.1,
                    time -any,
                    boxes >= 0.1.4 && < 0.2.0,
-                   aeson >= 0.8 && < 0.11,
+                   aeson >= 0.8 && < 0.12,
                    vector -any,
                    bower-json >= 0.7,
                    aeson-better-errors >= 0.8,
@@ -70,7 +76,7 @@ library
                    language-javascript == 0.5.*,
                    syb -any,
                    Glob >= 0.7 && < 0.8,
-                   process >= 1.2.0 && < 1.4,
+                   process >= 1.2.0 && < 1.5,
                    safe >= 0.3.9 && < 0.4,
                    semigroups >= 0.16.2 && < 0.19,
                    parallel >= 3.2 && < 3.3
@@ -207,7 +213,7 @@ executable psc
                    containers -any, directory -any, filepath -any,
                    mtl -any, optparse-applicative >= 0.10.0, parsec -any, purescript -any,
                    time -any, transformers -any, transformers-compat -any, Glob >= 0.7 && < 0.8,
-                   aeson >= 0.8 && < 0.11, bytestring -any, utf8-string >= 1 && < 2
+                   aeson >= 0.8 && < 0.12, bytestring -any, utf8-string >= 1 && < 2
     main-is: Main.hs
     buildable: True
     hs-source-dirs: psc
@@ -236,12 +242,12 @@ executable psci
     main-is: Main.hs
     buildable: True
     hs-source-dirs: psci psci/main
-    other-modules: Types
-                   Parser
-                   Directive
-                   Completion
-                   PSCi
-                   IO
+    other-modules: PSCi
+                   PSCi.Types
+                   PSCi.Parser
+                   PSCi.Directive
+                   PSCi.Completion
+                   PSCi.IO
     ghc-options: -Wall -O2
 
 executable psc-docs
@@ -296,24 +302,15 @@ test-suite tests
                    filepath -any, mtl -any, parsec -any, purescript -any,
                    transformers -any, process -any, transformers-compat -any, time -any,
                    Glob -any, aeson-better-errors -any, bytestring -any, aeson -any,
-                   base-compat -any
-    type: exitcode-stdio-1.0
-    main-is: Main.hs
-    other-modules: TestsSetup
-                   TestPscPublish
-                   TestDocs
-    buildable: True
-    hs-source-dirs: tests tests/common
-
-test-suite psci-tests
-    build-depends: base >=4 && <5, containers -any, directory -any, filepath -any,
-                   mtl -any, optparse-applicative >= 0.10.0, parsec -any,
-                   haskeline >= 0.7.0.0, purescript -any, transformers -any,
-                   transformers-compat -any, process -any, HUnit -any, time -any,
-                   Glob -any, base-compat >=0.6.0, boxes >= 0.1.4 && < 0.2.0
-    type: exitcode-stdio-1.0
-    main-is: Main.hs
-    other-modules: TestsSetup
-    buildable: True
-    hs-source-dirs: psci psci/tests tests/common
+                   base-compat -any, haskeline >= 0.7.0.0, optparse-applicative -any,
+                   boxes -any, HUnit -any
     ghc-options: -Wall
+    type: exitcode-stdio-1.0
+    main-is: Main.hs
+    other-modules: TestUtils
+                   TestCompiler
+                   TestDocs
+                   TestPscPublish
+                   TestPsci
+    buildable: True
+    hs-source-dirs: tests psci
