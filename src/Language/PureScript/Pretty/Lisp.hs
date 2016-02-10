@@ -55,17 +55,14 @@ literals = mkPattern' match
   match (LispObjectLiteral ps) = concat <$> sequence
     [ return "{\n"
     , withIndent $ do
-        lisps <- forM ps $ \(key, value) -> fmap ((':' : objectPropertyToString key ++ " ") ++) . prettyPrintLisp' $ value
+        lisps <- forM ps $ \(key, value) ->
+                             fmap ((safeName (':':key) ++ " ") ++) . prettyPrintLisp' $ value
         indentString <- currentIndent
         return $ intercalate ", \n" $ map (indentString ++) lisps
     , return "\n"
     , currentIndent
     , return "}"
     ]
-    where
-    objectPropertyToString :: String -> String
-    objectPropertyToString s | identNeedsEscaping s = concatMap identCharToString s
-                             | otherwise = s
   match (LispBlock [ret@LispObjectLiteral{}]) = withIndent $ prettyPrintLisp' ret
   match (LispBlock sts@(_:_:_))
     | all isIfReturn (init sts)
@@ -227,8 +224,9 @@ indexer = mkPattern' match
 indexer' :: Pattern PrinterState Lisp (String, Lisp)
 indexer' = mkPattern' match
   where
-  match (LispIndexer (LispStringLiteral index) val) = return (index, val)
-  match (LispIndexer index val) = (,) <$> prettyPrintLisp' index <*> pure val
+  match (LispIndexer (LispVar index) val) = return (safeName (':':index), val)
+  -- match (LispIndexer (LispStringLiteral index) val) = return (index, val)
+  -- match (LispIndexer index val) = (,) <$> prettyPrintLisp' index <*> pure val
   match _ = mzero
 
 lam :: Pattern PrinterState Lisp ((Maybe String, [String]), Lisp)
@@ -317,7 +315,7 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
   operators =
     OperatorTable [ [ Wrap accessor $ \prop val -> val ++ "/" ++ prop ]
                   , [ Wrap indexer $ \index val -> "(nth " ++ val ++ " " ++ index ++ ")" ]
-                  , [ Wrap indexer' $ \index val -> "(:" ++ index ++ " " ++ val ++ ")" ]
+                  , [ Wrap indexer' $ \index val -> "(" ++ index ++ " " ++ val ++ ")" ]
                   , [ Wrap app $ \args val -> "(" ++ val ++ " " ++ args ++ ")" ]
                   -- , [ unary LispNew "new " ]
                   , [ Wrap lam $ \(name, args) ret -> "("
@@ -341,7 +339,7 @@ prettyPrintLisp' = A.runKleisli $ runPattern matchValue
                     , binary    LessThanOrEqualTo    "<="
                     , binary    GreaterThan          ">"
                     , binary    GreaterThanOrEqualTo ">="
-                    , AssocR instanceOf $ \v1 v2 -> "(= (:ctor! " ++ v1 ++ ") " ++ v2 ++")" ]
+                    , AssocR instanceOf $ \v1 v2 -> "(= (:constructor " ++ v1 ++ ") " ++ v2 ++")" ]
                   , [ binary    EqualTo              "="
                     , binary    NotEqualTo           "/=" ]
                   , [ binary    BitwiseAnd           "&" ]

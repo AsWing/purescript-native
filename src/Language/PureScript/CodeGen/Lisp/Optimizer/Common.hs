@@ -66,7 +66,7 @@ removeFromBlock go (LispBlock sts) = LispBlock (go sts)
 removeFromBlock _  lisp = lisp
 
 isFn :: (String, String) -> Lisp -> Bool
-isFn (moduleName, fnName) (LispAccessor x (LispVar y)) = x == (identToLisp (Ident fnName)) && y == restoreName moduleName
+isFn (moduleName, fnName) (LispAccessor x (LispVar y)) = x == safeName fnName && y == restoreName moduleName
 isFn (moduleName, fnName) (LispAccessor x (LispVar y)) = x == fnName && y == moduleName
 isFn (moduleName, fnName) (LispIndexer (LispStringLiteral x) (LispVar y)) = x == fnName && y == restoreName moduleName
 isFn _ _ = False
@@ -75,7 +75,7 @@ isFn' :: [(String, String)] -> Lisp -> Bool
 isFn' xs lisp = any (`isFn` lisp) xs
 
 isDict :: (String, String) -> Lisp -> Bool
-isDict (moduleName, dictName) (LispAccessor x (LispVar y)) = x == identToLisp (Ident dictName) && y == restoreName moduleName
+isDict (moduleName, dictName) (LispAccessor x (LispVar y)) = x == safeName dictName && y == restoreName moduleName
 isDict _ _ = False
 
 isDict' :: [(String, String)] -> Lisp -> Bool

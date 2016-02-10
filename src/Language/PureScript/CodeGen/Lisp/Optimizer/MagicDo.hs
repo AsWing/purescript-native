@@ -8,6 +8,7 @@ import Data.List (nub)
 import Data.Maybe (fromJust, isJust)
 
 import Language.PureScript.CodeGen.Lisp.AST
+import Language.PureScript.CodeGen.Lisp.Common
 import Language.PureScript.CodeGen.Lisp.Optimizer.Common
 import Language.PureScript.Options
 import qualified Language.PureScript.Constants as C
@@ -65,7 +66,7 @@ magicDo' = everywhereOnLisp undo . everywhereOnLispTopDown convert
   -- Check if an expression represents the polymorphic pure or return function
   isPurePoly = isFn' [(C.prelude, C.pure'), (C.prelude, C.return), (C.controlApplicative, C.pure')]
   -- Check if an expression represents a function in the Eff module
-  isEffFunc name (LispAccessor name' (LispVar eff)) = eff == C.eff && name == name'
+  isEffFunc name (LispAccessor name' (LispVar eff)) = eff == safeName C.eff && restoreName name == name'
   isEffFunc _ _ = False
 
   -- Remove __do function applications which remain after desugaring
@@ -109,7 +110,7 @@ inlineST = everywhereOnLisp convertBlock
     if agg then LispAssignment ref (LispApp func [ref]) else  LispAssignment (LispAccessor C.stRefValue ref) (LispApp func [LispAccessor C.stRefValue ref])
   convert _ other = other
   -- Check if an expression represents a function in the ST module
-  isSTFunc name (LispAccessor name' (LispVar st)) = st == C.st && name == name'
+  isSTFunc name (LispAccessor name' (LispVar st)) = st == safeName C.st && restoreName name == name'
   isSTFunc _ _ = False
   -- Find all ST Refs initialized in this block
   findSTRefsIn = everythingOnLisp (++) isSTRef

@@ -19,13 +19,17 @@ import Language.PureScript.Names
 --  * Symbols are prefixed with '!' followed by a symbol name or their ordinal value.
 --
 identToLisp :: Ident -> String
-identToLisp (Ident name)
-  | nameIsLispReserved name || nameIsLispBuiltIn name = "!!" ++ name
-  | [c] <- name, isLower c = '_' : identCharToString c
-  | (c:_) <- name, isLower c = '!' : concatMap identCharToString name
-  | otherwise = concatMap identCharToString name
+identToLisp (Ident name) = safeName name
 identToLisp (Op op) = concatMap identCharToString op
 identToLisp (GenIdent _ _) = internalError "GenIdent in identToLisp"
+
+safeName :: String -> String
+safeName name
+  | nameIsLispReserved name || nameIsLispBuiltIn name = "!!" ++ name
+  -- | [c] <- name, isLower c = '_' : identCharToString c
+  | (':':name') <- name = ':' : concatMap identCharToString name'
+  | (c:_) <- name, isLower c = '!' : concatMap identCharToString name
+  | otherwise = concatMap identCharToString name
 
 -- |
 -- Test if a string is a valid Lisp identifier without escaping.

@@ -36,11 +36,11 @@ removeCodeAfterReturnStatements = everywhereOnLisp (removeFromBlock go)
 removeUnusedArg :: Lisp -> Lisp
 removeUnusedArg = everywhereOnLisp convert
   where
-  convert (LispFunction name [arg] body) | arg == C.__unused = LispFunction name [] body
+  convert (LispFunction name [arg] body) | arg == C.__unused = LispFunction name ["_"] body
   convert lisp = lisp
 
 removeUndefinedApp :: Lisp -> Lisp
 removeUndefinedApp = everywhereOnLisp convert
   where
-  convert (LispApp fn [LispVar arg]) | arg == C.undefined = LispApp fn []
+  convert (LispApp fn [LispVar arg]) | arg == C.undefined = LispApp fn [LispVar "nil"]
   convert lisp = lisp

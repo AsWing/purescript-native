@@ -168,7 +168,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
       Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
         let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname)) in
-        return . LispObjectLiteral $ zip ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns)) args'
+        return . LispObjectLiteral $ zip ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns))
+                                         args'
       _ -> flip (foldl (\fn a -> LispApp fn [a])) args' <$> valueToLisp f
     where
     unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
@@ -222,7 +223,8 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
   valueToLisp (Constructor _ _ (ProperName ctor) fields) =
     return $ LispFunction Nothing
                           (fields')
-                          (LispReturn $ LispObjectLiteral (("ctor!", LispVar (':':ctor)) : zip fields' (LispVar <$> fields')))
+                          (LispReturn $ LispObjectLiteral (("constructor", LispVar (safeName (':':ctor))) :
+                                                           zip fields' (LispVar <$> fields')))
     where
     fields' = identToLisp <$> fields
   literalToValueLisp :: Literal (Expr Ann) -> m Lisp
@@ -309,7 +311,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
     return $ case ctorType of
       ProductType -> lisps
       SumType ->
-        [LispIfElse (LispInstanceOf (LispVar varName) (LispVar (':':ctor)))
+        [LispIfElse (LispInstanceOf (LispVar varName) (LispVar (safeName (':':ctor))))
                   (LispBlock lisps)
                   Nothing]
     where
@@ -319,7 +321,7 @@ moduleToLisp env (Module coms mn imps exps foreigns decls) foreign_ =
       argVar <- freshName
       done'' <- go remain done'
       lisp <- binderToLisp argVar done'' binder
-      return (LispVariableIntroduction argVar (Just (LispIndexer (LispVar $ identToLisp field) (LispVar varName))) : lisp)
+      return (LispVariableIntroduction argVar (Just (LispIndexer (LispVar $ runIdent field) (LispVar varName))) : lisp)
   binderToLisp _ _ ConstructorBinder{} =
     internalError "binderToLisp: Invalid ConstructorBinder in binderToLisp"
   binderToLisp varName done (NamedBinder _ ident binder) = do
